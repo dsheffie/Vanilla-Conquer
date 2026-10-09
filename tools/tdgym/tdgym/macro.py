@@ -9,6 +9,8 @@ The observation adds a normalised feature vector and the action mask, so masks t
 with observations through vector environments.
 """
 
+from dataclasses import dataclass
+
 import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
@@ -64,18 +66,43 @@ NON_COMBAT = {b"HARV", b"MCV", b"E6"}
 FEATURES = len(SCALARS) + len(CATALOG) * len(BUILDABLE_FEATURES)
 
 
-def default_reward(previous, scalars, status, won, lost):
-    """Win or lose, plus small shaping terms so there is signal before the first win."""
-    delta = {k: scalars[k] - previous[k] for k in scalars}
-    return (
-        (1.0 if won else 0.0)
-        - (1.0 if lost else 0.0)
-        + 0.0002 * delta["harvested_credits"]
-        + 0.02 * delta["units_killed"]
-        + 0.05 * delta["buildings_killed"]
-        - 0.02 * delta["units_lost"]
-        - 0.05 * delta["buildings_lost"]
-    )
+@dataclass
+class Reward:
+    """
+    Reward weights. Winning dominates: everything else is shaping toward it, and is capped
+    well below the win reward over a whole game.
+
+    An episode that hits the time limit scores almost like a loss and ends there, rather
+    than being treated as cut short, so a policy can't score by stalling; destroying
+    enemy buildings is what makes up the difference.
+    """
+
+    win: float = 10.0
+    loss: float = -10.0
+    timeout: float = -8.0
+    enemy_building_destroyed: float = 0.2
+    enemy_unit_killed: float = 0.05
+    building_lost: float = -0.2
+    unit_lost: float = -0.05
+    # Spread over the whole map: exploring all of it is worth this much in total.
+    explored: float = 1.0
+    # Per credit harvested. Enough to get an economy going, too little to be the goal:
+    # a strong 30 minute economy (~45k credits) is worth about 0.45.
+    harvested: float = 0.00001
+
+    def __call__(self, previous, scalars, explored_delta, won, lost, timed_out):
+        delta = {k: scalars[k] - previous[k] for k in scalars}
+        return (
+            (self.win if won else 0.0)
+            + (self.loss if lost else 0.0)
+            + (self.timeout if timed_out else 0.0)
+            + self.enemy_building_destroyed * delta["buildings_killed"]
+            + self.enemy_unit_killed * delta["units_killed"]
+            + self.building_lost * delta["buildings_lost"]
+            + self.unit_lost * delta["units_lost"]
+            + self.explored * explored_delta
+            + self.harvested * delta["harvested_credits"]
+        )
 
 
 class MacroEnv(gym.Wrapper):
@@ -87,11 +114,11 @@ class MacroEnv(gym.Wrapper):
     Action: Discrete(len(ACTIONS)), see ACTIONS.
     """
 
-    def __init__(self, env, decision_frames=30, reward_fn=default_reward):
+    def __init__(self, env, decision_frames=30, reward=None):
         super().__init__(env)
         self.base = env.unwrapped
         self.base.frame_skip = decision_frames
-        self.reward_fn = reward_fn
+        self.reward = reward if reward is not None else Reward()
         self.observation_space = spaces.Dict(
             {
                 "map": env.observation_space["map"],
@@ -103,6 +130,7 @@ class MacroEnv(gym.Wrapper):
 
     def reset(self, **kwargs):
         obs, info = self.env.reset(**kwargs)
+        self._explored_fraction = self._explored_now()
         return self._wrap(obs), info
 
     def step(self, action):
@@ -112,9 +140,17 @@ class MacroEnv(gym.Wrapper):
         obs, _, terminated, truncated, info = self.env.step(np.zeros(6, dtype=np.int64))
         won = terminated and info["status"] == 1
         lost = terminated and info["status"] == 2
-        reward = self.reward_fn(previous, self.base._scalars, info["status"], won, lost)
-        info["won"], info["lost"] = won, lost
-        return self._wrap(obs), float(reward), terminated, truncated, info
+        timed_out = truncated and not terminated
+        explored = self._explored_now()
+        reward = self.reward(previous, self.base._scalars, explored - self._explored_fraction, won, lost, timed_out)
+        self._explored_fraction = explored
+        info["won"], info["lost"], info["timed_out"] = won, lost, timed_out
+        # A timeout is the end of the game for scoring, not an interruption: report it as
+        # terminal so learners don't bootstrap a value past it and undo the penalty.
+        return self._wrap(obs), float(reward), terminated or timed_out, False, info
+
+    def _explored_now(self):
+        return float(self.base._explored.mean())
 
     # Observation.
 

@@ -168,9 +168,11 @@ harvested credit makes 45k credits worth about +9, against +1 for a win, so turt
 
 ## Next steps
 
-1. **Fix the reward** (`macro.default_reward`): cut the harvest term by 10-100x or anneal it
-   to zero, raise the win/loss reward, reward destroying enemy buildings more than units.
-   Consider making a 30-minute timeout count partly as a loss.
+1. **Train with the new reward** (`macro.Reward`, done after macro-v1): win +10, loss -10,
+   timeout -8 and terminal, building kills +0.2, exploration up to +1, harvesting 20x
+   smaller. Under it macro-v1's turtling scores about -6, losing about -12. If training
+   stalls at turtling, raise `timeout` to `loss`; if it farms civilian buildings for the
+   kill bonus, filter kills by owner.
 2. **Evaluate macro-v1** to see what it does with its army (`evaluate.py --show-actions`).
 3. **Scale up**: more envs and longer runs; then more maps (`--map`), both sides
    (`agent_side`) and 2-3 AI opponents (`num_ais`) for robustness.

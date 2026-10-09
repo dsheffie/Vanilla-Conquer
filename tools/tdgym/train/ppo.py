@@ -120,7 +120,7 @@ def main():
     metrics = csv.writer(metrics_file)
     if new_file:
         metrics.writerow(
-            ["update", "global_step", "sps", "episodes", "win_rate", "loss_rate", "return", "minutes",
+            ["update", "global_step", "sps", "episodes", "win_rate", "loss_rate", "timeout_rate", "return", "minutes",
              "harvested", "kills", "losses", "policy_loss", "value_loss", "entropy", "approx_kl"]
         )
 
@@ -165,6 +165,7 @@ def main():
                         {
                             "won": bool(final["won"]),
                             "lost": bool(final["lost"]),
+                            "timed_out": bool(final["timed_out"]),
                             "minutes": scalars["frame"] / 900,
                             "harvested": scalars["harvested_credits"],
                             "kills": scalars["units_killed"] + scalars["buildings_killed"],
@@ -220,7 +221,7 @@ def main():
             return float(np.mean([e[key] for e in episodes])) if episodes else float("nan")
         returns_recent = [e["return"] for e in recent if "return" in e]
         row = [
-            update, global_step, round(sps), len(episodes), mean("won"), mean("lost"),
+            update, global_step, round(sps), len(episodes), mean("won"), mean("lost"), mean("timed_out"),
             float(np.mean(returns_recent)) if returns_recent else float("nan"), mean("minutes"),
             mean("harvested"), mean("kills"), mean("losses"), policy_loss.item(), value_loss.item(),
             entropy.item(), approx_kl.item(),
@@ -228,9 +229,9 @@ def main():
         metrics.writerow(row)
         metrics_file.flush()
         print(
-            "update %4d  step %8d  %5d sps  episodes %3d  win %.2f  loss %.2f  return %6.2f  "
+            "update %4d  step %8d  %5d sps  episodes %3d  win %.2f  loss %.2f  timeout %.2f  return %6.2f  "
             "minutes %4.1f  harvested %6.0f  kills %4.1f  losses %4.1f  entropy %.2f"
-            % tuple(row[:11] + [row[13]]),
+            % tuple(row[:12] + [row[14]]),
             flush=True,
         )
 

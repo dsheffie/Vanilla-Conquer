@@ -81,6 +81,7 @@ def evaluate(policy, episodes, seed, env_kwargs):
             {
                 "won": info["won"],
                 "lost": info["lost"],
+                "timed_out": info["timed_out"],
                 "return": total,
                 "minutes": info["scalars"]["frame"] / 900,
                 "harvested": info["scalars"]["harvested_credits"],
