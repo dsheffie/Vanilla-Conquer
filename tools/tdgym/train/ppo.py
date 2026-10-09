@@ -13,6 +13,11 @@ the last --curriculum-window games at that level, keeping --curriculum-floor of 
 the easier levels (see curriculum.py). Each env's next game is assigned as its current one
 starts. Win rates are logged per difficulty.
 
+--maps picks each game's map at random from a list such as "1-8" or "all" (the 16 maps in
+tdgym.env.MAPS), and --side random plays GDI or Nod at random; holding maps out of training
+and evaluating on them with evaluate.py --maps tests whether the policy generalises. Every
+finished game is appended to run-dir/episodes.csv with its map, side and difficulty.
+
 --benchmark trains for --total-steps with fixed seeds and no checkpoints, then reports the
 wall time and where it went (game processes, policy inference, PPO updates), with the
 machine and settings, to stdout and run-dir/benchmark.json if --run-dir is given.
@@ -40,7 +45,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 from tdgym.env import GRID, PLANES  # noqa: E402
-from tdgym.env import AI_DIFFICULTIES, ai_difficulty_level  # noqa: E402
+from tdgym.env import AI_DIFFICULTIES, SIDES, ai_difficulty_level, parse_maps  # noqa: E402
 from tdgym.macro import ACTIONS, FEATURES, make_macro_env  # noqa: E402
 
 from curriculum import Curriculum  # noqa: E402
@@ -68,7 +73,8 @@ def parse_args():
     p.add_argument("--max-restarts", type=int, default=20, help="game process crashes tolerated per run")
     p.add_argument("--device", default="auto", help="auto, mps, cuda or cpu")
     p.add_argument("--seed", type=int, default=1)
-    p.add_argument("--map", type=int, default=1)
+    p.add_argument("--maps", type=parse_maps, default="1", help='maps to play, e.g. 1, 1-8, 1,3,5 or all')
+    p.add_argument("--side", default="gdi", choices=SIDES + ("random",))
     p.add_argument("--ai-difficulty", default="normal", choices=AI_DIFFICULTIES)
     p.add_argument("--curriculum", action="store_true", help="adapt the AI difficulty, see above")
     p.add_argument("--curriculum-threshold", type=float, default=0.5)
@@ -95,7 +101,8 @@ def make_env(args):
         return make_macro_env(
             decision_frames=args.decision_frames,
             max_minutes=args.max_minutes,
-            map_number=args.map,
+            map_number=args.maps,
+            agent_side=args.side,
             ai_difficulty=args.ai_difficulty,
         )
 
@@ -166,6 +173,15 @@ def main():
     values = torch.zeros((t, n), device=device)
 
     recent = collections.deque(maxlen=100)
+    episodes_path = os.path.join(args.run_dir, "episodes.csv")
+    new_file = not os.path.exists(episodes_path)
+    episodes_file = open(episodes_path, "a", newline="")
+    episodes_log = csv.writer(episodes_file)
+    if new_file:
+        episodes_log.writerow(
+            ["update", "global_step", "map", "side", "ai_difficulty", "won", "lost", "timed_out", "minutes",
+             "harvested", "kills", "losses"]
+        )
     metrics_path = os.path.join(args.run_dir, "metrics.csv")
     new_file = not os.path.exists(metrics_path)
     metrics_file = open(metrics_path, "a", newline="")
@@ -266,6 +282,12 @@ def main():
                                 "losses": scalars["units_lost"] + scalars["buildings_lost"],
                             }
                         )
+                        e = recent[-1]
+                        episodes_log.writerow(
+                            [update, global_step, final["map_number"], SIDES[final["agent_side"]],
+                             AI_DIFFICULTIES[difficulty], int(e["won"]), int(e["lost"]), int(e["timed_out"]),
+                             round(e["minutes"], 2), e["harvested"], e["kills"], e["losses"]]
+                        )
                 episode_returns_add(recent, done, rewards[step])
                 if args.curriculum and done.any():
                     envs.set_attr("ai_difficulty", next_difficulty)
@@ -357,6 +379,7 @@ def main():
         ]
         metrics.writerow(row)
         metrics_file.flush()
+        episodes_file.flush()
         print(
             "update %4d  step %8d  %5d sps  episodes %3d  win %.2f  loss %.2f  timeout %.2f  return %6.2f  "
             "minutes %4.1f  harvested %6.0f  kills %4.1f  losses %4.1f  entropy %.2f  "
@@ -445,7 +468,7 @@ def report_benchmark(args, out_dir, device, wall_s, setup_s, decisions, updates,
         "settings": {
             "device": str(device), "envs": args.envs, "steps": args.steps, "total_steps": args.total_steps,
             "decision_frames": args.decision_frames, "epochs": args.epochs, "minibatches": args.minibatches,
-            "map": args.map, "seed": args.seed, "ai_difficulty": args.ai_difficulty,
+            "maps": list(args.maps), "side": args.side, "seed": args.seed, "ai_difficulty": args.ai_difficulty,
         },
         "results": {
             "wall_s": round(wall_s, 1),

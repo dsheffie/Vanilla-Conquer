@@ -2,6 +2,9 @@
 
     python evaluate.py --policy random|scripted|CHECKPOINT [--episodes N]
     python evaluate.py --policy CHECKPOINT --episodes 1 --video game.mp4 [--video-speed 8] [--video-scale 0.5]
+    python evaluate.py --policy CHECKPOINT --episodes 18 --maps 9 --side random
+
+--maps and --side work as in ppo.py: each episode picks its map and side at random.
 
 random picks uniformly among valid actions; scripted follows a fixed build order and
 attacks with a large enough army; anything else is a checkpoint saved by ppo.py.
@@ -21,6 +24,7 @@ import gymnasium as gym
 import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+from tdgym.env import SIDES, parse_maps  # noqa: E402
 from tdgym.macro import ACTION_INDEX, ACTIONS, make_macro_env  # noqa: E402
 
 BUILD_ORDER = ["build_power", "build_refinery", "build_barracks", "build_power", "build_factory", "build_refinery"]
@@ -128,6 +132,8 @@ def evaluate(policy, episodes, seed, env_kwargs, video=None):
             done = terminated or truncated
         results.append(
             {
+                "map": info["map_number"],
+                "side": SIDES[info["agent_side"]],
                 "won": info["won"],
                 "lost": info["lost"],
                 "timed_out": info["timed_out"],
@@ -151,7 +157,8 @@ def main():
     parser.add_argument("--policy", default="scripted")
     parser.add_argument("--episodes", type=int, default=4)
     parser.add_argument("--seed", type=int, default=1000)
-    parser.add_argument("--map", type=int, default=1)
+    parser.add_argument("--maps", type=parse_maps, default="1", help="maps to play, e.g. 1, 1-8, 1,3,5 or all")
+    parser.add_argument("--side", default="gdi", choices=SIDES + ("random",))
     parser.add_argument("--ai-difficulty", default="normal", choices=["easy", "normal", "hard"])
     parser.add_argument("--max-minutes", type=float, default=30)
     parser.add_argument("--show-actions", action="store_true")
@@ -171,13 +178,13 @@ def main():
     if args.video:
         video = {"path": args.video, "speed": args.video_speed, "fps": args.video_fps, "scale": args.video_scale}
     results = evaluate(
-        policy, args.episodes, args.seed, {"map_number": args.map, "max_minutes": args.max_minutes, "ai_difficulty": args.ai_difficulty}, video
+        policy, args.episodes, args.seed, {"map_number": args.maps, "agent_side": args.side, "max_minutes": args.max_minutes, "ai_difficulty": args.ai_difficulty}, video
     )
     for r in results:
         outcome = "won" if r["won"] else "lost" if r["lost"] else "time limit"
         print(
-            "%-10s %5.1f min  return %6.2f  harvested %6d  kills %3d  losses %3d"
-            % (outcome, r["minutes"], r["return"], r["harvested"], r["kills"], r["losses"])
+            "map %d %-3s  %-10s %5.1f min  return %6.2f  harvested %6d  kills %3d  losses %3d"
+            % (r["map"], r["side"], outcome, r["minutes"], r["return"], r["harvested"], r["kills"], r["losses"])
         )
         if "video" in r:
             print("    video %s: %d frames, %.0f s" % (r["video"][0], r["video"][1], r["video"][1] / args.video_fps))

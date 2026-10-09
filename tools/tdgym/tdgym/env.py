@@ -91,6 +91,38 @@ def ai_difficulty_level(value):
     return int(value)
 
 
+# Multiplayer maps in the original game data (GENERAL.MIX): SCM01EA-SCM09EA, SCM70EA-SCM74EA,
+# SCM77EA and SCM96EA.
+MAPS = tuple(range(1, 10)) + (70, 71, 72, 73, 74, 77, 96)
+SIDES = ("gdi", "nod")
+
+
+def parse_maps(text):
+    """Map numbers from "all" or a list like "1-8" or "1,3,5-7"."""
+    if text == "all":
+        return MAPS
+    maps = []
+    for part in text.split(","):
+        first, _, last = part.partition("-")
+        maps.extend(range(int(first), int(last or first) + 1))
+    if not maps or any(m not in MAPS for m in maps):
+        raise ValueError("maps must be among %s" % (MAPS,))
+    return tuple(maps)
+
+
+def side_choice(value):
+    """0 GDI, 1 Nod, or None for a random side each game, from a level or one of SIDES or "random"."""
+    if value == "random" or value is None:
+        return None
+    if isinstance(value, str):
+        if value not in SIDES:
+            raise ValueError("agent_side must be one of %s or random" % (SIDES,))
+        return SIDES.index(value)
+    if value not in (0, 1):
+        raise ValueError("agent_side must be 0 or 1")
+    return int(value)
+
+
 def _env_path(value, variable):
     value = value or os.environ.get(variable)
     if not value:
@@ -104,6 +136,9 @@ class TiberianDawnEnv(gym.Env):
     the information a human would have: other houses' objects only show in explored cells.
     ai_difficulty ("easy", "normal", "hard" or 0-2) scales the AI players' firepower, armor,
     speed, rate of fire, costs and build speed by the game rules' difficulty settings.
+    map_number is one of MAPS, or a sequence of them to pick from at random each game;
+    agent_side is "gdi", "nod" (or 0, 1), or "random" for either each game. info reports the
+    game's map_number and agent_side.
 
     Observation (dict):
       map:        uint8 (len(PLANES), 64, 64), see PLANES; grid cell [y, x].
@@ -166,11 +201,15 @@ class TiberianDawnEnv(gym.Env):
             work_dir,
             disc,
         )
-        self.map_number = map_number
+        self.maps = (map_number,) if np.isscalar(map_number) else tuple(map_number)
+        if not self.maps or any(m not in MAPS for m in self.maps):
+            raise ValueError("map_number must be among %s" % (MAPS,))
         self.num_ais = num_ais
         self.ai_difficulty = ai_difficulty
         self._episode_ai_difficulty = self.ai_difficulty
-        self.agent_side = agent_side
+        self.agent_side = side_choice(agent_side)
+        self._episode_map = self.maps[0]
+        self._episode_side = self.agent_side or 0
         self.credits = credits
         self.frame_skip = frame_skip
         self.max_frames = max_frames
@@ -209,8 +248,11 @@ class TiberianDawnEnv(gym.Env):
             self.ai_difficulty = options["ai_difficulty"]
         game_seed = int(self.np_random.integers(1, 2**31))
         self._episode_ai_difficulty = self.ai_difficulty
+        # Only draw when there is a choice, so fixed settings keep the game seeds they always had.
+        self._episode_map = int(self.np_random.choice(self.maps)) if len(self.maps) > 1 else self.maps[0]
+        self._episode_side = int(self.np_random.integers(2)) if self.agent_side is None else self.agent_side
         self._native.reset(
-            self.map_number, self.num_ais, game_seed, self.agent_side, self.credits, self.ai_difficulty
+            self._episode_map, self.num_ais, game_seed, self._episode_side, self.credits, self.ai_difficulty
         )
         self._status = _native.RUNNING
         self._capture()
@@ -356,6 +398,8 @@ class TiberianDawnEnv(gym.Env):
             "scalars": dict(self._scalars),
             "action_mask": self._action_mask(),
             "ai_difficulty": self._episode_ai_difficulty,
+            "map_number": self._episode_map,
+            "agent_side": self._episode_side,
         }
         info.update(extra)
         return info

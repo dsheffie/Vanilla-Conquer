@@ -137,6 +137,15 @@ game later. The log and `metrics.csv` show the current level and win rates per d
 `--resume` continues the curriculum, and `--init-from CHECKPOINT` starts a new run from
 another run's weights, e.g. to carry a policy trained against normal into a curriculum.
 
+**Maps and sides:** `--maps` picks each game's map at random from a list such as `1-8`,
+`1,3,70-74` or `all`, the 16 multiplayer maps in the data (SCM01-09, 70-74, 77, 96, all
+within the 64x64 observation grid); the default is map 1. `--side gdi|nod|random` sets the
+agent's side, GDI by default. Both are on `evaluate.py` too, and as `map_number=` (a number
+or a list) and `agent_side=` on the envs, with each game's choice in `info`. Every finished
+training game goes to `episodes.csv` with its map, side and difficulty, for win rates per
+map. To test generalisation, hold maps out, e.g. train on `--maps 1-8,70-74` and evaluate
+on `--maps 9,77,96`. All runs before this used map 1 as GDI only.
+
 `--device auto` picks CUDA, then MPS, then CPU. `--envs` is one game per process; use
 about one per core and leave a few cores for the learner. Resume with `--resume runs/NAME/latest.pt`.
 Progress is in `runs/NAME/metrics.csv` (one row per update); watch `win_rate`,
@@ -267,8 +276,8 @@ harvested credit makes 45k credits worth about +9, against +1 for a win, so turt
    stalls at turtling, raise `timeout` to `loss`; if it farms civilian buildings for the
    kill bonus, filter kills by owner.
 2. **Evaluate macro-v1** to see what it does with its army (`evaluate.py --show-actions`).
-3. **Scale up**: more envs and longer runs; then more maps (`--map`), both sides
-   (`agent_side`) and 2-3 AI opponents (`num_ais`) for robustness.
+3. **Scale up**: more envs and longer runs; train across maps (`--maps`) and both sides
+   (`--side random`), and with 2-3 AI opponents (`num_ais`) for robustness.
 4. **Self-play** needs two agent-controlled players; `tdenv` currently has one agent
    (player 0) and AI opponents.
 5. **Environment gaps**: no terrain passability layer (the dll doesn't export it), no special
