@@ -217,6 +217,13 @@ extern "C" __declspec(dllexport) void __cdecl CNC_Start_Mission_Timer(int time);
 extern "C" __declspec(dllexport) void __cdecl CNC_Set_Random_Seed(unsigned int seed);
 extern "C" __declspec(dllexport) void __cdecl CNC_Set_Headless(bool headless);
 extern "C" __declspec(dllexport) void __cdecl CNC_Free_Game(void);
+extern "C" __declspec(dllexport) void __cdecl CNC_Set_AI_Difficulty(int difficulty);
+
+/*
+** Handicap for AI players in multiplayer games, set by CNC_Set_AI_Difficulty; -1 leaves the
+** default (normal).
+*/
+static int AIHandicap = -1;
 extern "C" __declspec(dllexport) bool __cdecl CNC_Get_Start_Game_Info(uint64 player_id,
                                                                       int& start_location_waypoint_index);
 
@@ -978,6 +985,9 @@ void GlyphX_Assign_Houses(void)
         strncpy((char*)housep->Name, MPlayerNames[i], MPLAYER_NAME_MAX - 1);
         housep->IsHuman = MPlayerIsHuman[i];
         housep->Init_Data(color, pref_house, MPlayerCredits);
+        if (!housep->IsHuman && AIHandicap >= 0) {
+            housep->Assign_Handicap((DiffType)AIHandicap);
+        }
 
         /*
         **	Set the start location override
@@ -1972,6 +1982,24 @@ static bool Headless = false;
 extern "C" __declspec(dllexport) void __cdecl CNC_Set_Headless(bool headless)
 {
     Headless = headless;
+}
+
+/**************************************************************************************************
+ * CNC_Set_AI_Difficulty -- Difficulty of AI players in multiplayer games: 0 easy, 1 normal, 2 hard
+ *
+ * The remaster leaves every skirmish AI at normal. Call before starting the instance; it
+ * scales the AI houses' firepower, armor, speed, rate of fire, cost and build speed by the
+ * difficulty rules. Remaster builds have no difficulty rules of their own: set them with
+ * CNC_Config first.
+ **************************************************************************************************/
+extern "C" __declspec(dllexport) void __cdecl CNC_Set_AI_Difficulty(int difficulty)
+{
+    /*
+    ** A handicap says how easy the game is for that house, so a hard AI gets DIFF_EASY, as
+    ** the original game gives the computer DIFF_HARD when the player picks easy.
+    */
+    static const DiffType handicaps[] = {DIFF_HARD, DIFF_NORMAL, DIFF_EASY};
+    AIHandicap = (difficulty >= 0 && difficulty <= 2) ? handicaps[difficulty] : -1;
 }
 
 /**************************************************************************************************

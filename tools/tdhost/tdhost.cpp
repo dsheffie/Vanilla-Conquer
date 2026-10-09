@@ -147,6 +147,18 @@ bool Prepare_Work_Dir(const std::string& lib,
     return Copy_File(lib, lib_copy, error);
 }
 
+/*
+** Difficulty rules, indexed by handicap (easy, normal, hard). Remaster builds of the dll have
+** none of their own (the remaster passed its own in), so every handicap would play the same.
+** Easy and hard are the values the vanilla game uses; normal is the dll's built-in default,
+** which keeps normal games exactly as they were.
+*/
+static const CNCDifficultyDataStruct DifficultyRules[3] = {
+    {1.1f, 1.1f, 1.1f, 1.0f, 0.8f, 0.8f, 0.6f, 0.001f, 0.002f, false, true, true},
+    {1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 0.02f, 0.03f, false, true, false},
+    {0.9f, 0.9f, 0.9f, 1.05f, 1.05f, 1.0f, 1.0f, 0.05f, 0.1f, true, true, true},
+};
+
 GameLib::~GameLib()
 {
     Unload();
@@ -178,6 +190,8 @@ bool GameLib::Load(const std::string& path, EventCallback callback, std::string&
               && Lookup(Handle, "CNC_Set_Random_Seed", Set_Random_Seed, error)
               && Lookup(Handle, "CNC_Set_Headless", Set_Headless, error)
               && Lookup(Handle, "CNC_Free_Game", Free_Game, error)
+              && Lookup(Handle, "CNC_Set_AI_Difficulty", Set_AI_Difficulty, error)
+              && Lookup(Handle, "CNC_Config", Config, error)
               && Lookup(Handle, "CNC_Get_Visible_Page", Get_Visible_Page, error)
               && Lookup(Handle, "CNC_Get_Palette", Get_Palette, error)
               && Lookup(Handle, "CNC_Handle_Input", Handle_Input, error)
@@ -192,6 +206,11 @@ bool GameLib::Load(const std::string& path, EventCallback callback, std::string&
     }
     Set_Headless(true);
     Init("", callback);
+    CNCRulesDataStruct rules;
+    for (int i = 0; i < 3; ++i) {
+        rules.Difficulties[i] = DifficultyRules[i];
+    }
+    Config(rules);
     return true;
 }
 
@@ -243,6 +262,7 @@ bool GameLib::Start_Skirmish(const SkirmishSettings& settings, const std::string
     if (settings.Seed != 0) {
         Set_Random_Seed(settings.Seed);
     }
+    Set_AI_Difficulty(settings.AIDifficulty);
     // Scenario variation A, east, build level 7, multiplayer game, no sabotaged structure.
     if (!Start_Instance_Variation(
             settings.Map, 0, 0, 7, "GDI", "GAME_GLYPHX_MULTIPLAYER", data_dir.c_str(), -1, nullptr)) {

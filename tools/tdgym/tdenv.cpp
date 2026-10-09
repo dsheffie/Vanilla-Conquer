@@ -356,7 +356,7 @@ int tdenv_open(const char* lib, const char* data, const char* disc, const char* 
     return 0;
 }
 
-int tdenv_reset(int map, int num_ais, unsigned seed, int agent_side, int credits)
+int tdenv_reset(int map, int num_ais, unsigned seed, int agent_side, int credits, int ai_difficulty)
 {
     if (LibCopy.empty()) {
         return Fail("tdenv_open has not succeeded");
@@ -371,6 +371,7 @@ int tdenv_reset(int map, int num_ais, unsigned seed, int agent_side, int credits
     settings.Map = map;
     settings.Credits = credits;
     settings.Seed = seed;
+    settings.AIDifficulty = ai_difficulty;
     settings.Players.push_back({false, agent_side});
     for (int i = 0; i < num_ais; ++i) {
         settings.Players.push_back({true, (agent_side + 1 + i) % 2});

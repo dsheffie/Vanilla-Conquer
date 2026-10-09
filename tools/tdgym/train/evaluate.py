@@ -152,6 +152,7 @@ def main():
     parser.add_argument("--episodes", type=int, default=4)
     parser.add_argument("--seed", type=int, default=1000)
     parser.add_argument("--map", type=int, default=1)
+    parser.add_argument("--ai-difficulty", default="normal", choices=["easy", "normal", "hard"])
     parser.add_argument("--max-minutes", type=float, default=30)
     parser.add_argument("--show-actions", action="store_true")
     parser.add_argument("--video", help="record each episode to this MP4 (needs ffmpeg)")
@@ -170,7 +171,7 @@ def main():
     if args.video:
         video = {"path": args.video, "speed": args.video_speed, "fps": args.video_fps, "scale": args.video_scale}
     results = evaluate(
-        policy, args.episodes, args.seed, {"map_number": args.map, "max_minutes": args.max_minutes}, video
+        policy, args.episodes, args.seed, {"map_number": args.map, "max_minutes": args.max_minutes, "ai_difficulty": args.ai_difficulty}, video
     )
     for r in results:
         outcome = "won" if r["won"] else "lost" if r["lost"] else "time limit"

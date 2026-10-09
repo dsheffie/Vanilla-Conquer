@@ -138,7 +138,7 @@ class Native:
         signatures = {
             "tdenv_last_error": ([], c_str),
             "tdenv_open": ([c_str, c_str, c_str, c_str], c_int),
-            "tdenv_reset": ([c_int, c_int, c_uint, c_int, c_int], c_int),
+            "tdenv_reset": ([c_int, c_int, c_uint, c_int, c_int, c_int], c_int),
             "tdenv_grid_size": ([int_p, int_p], c_int),
             "tdenv_set_rendering": ([c_int], c_int),
             "tdenv_frame": ([byte_p, c_int, int_p, int_p], c_int),
@@ -167,8 +167,8 @@ class Native:
             raise TDEnvError(self._lib.tdenv_last_error().decode(errors="replace"))
         return result
 
-    def reset(self, map_number, num_ais, seed, agent_side, credits):
-        self._check(self._lib.tdenv_reset(map_number, num_ais, seed, agent_side, credits))
+    def reset(self, map_number, num_ais, seed, agent_side, credits, ai_difficulty=1):
+        self._check(self._lib.tdenv_reset(map_number, num_ais, seed, agent_side, credits, ai_difficulty))
         w, h = ctypes.c_int(), ctypes.c_int()
         self._check(self._lib.tdenv_grid_size(ctypes.byref(w), ctypes.byref(h)))
         self.width, self.height = w.value, h.value

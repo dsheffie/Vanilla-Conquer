@@ -121,6 +121,13 @@ on every platform. The scripted agent should end with PROC, NUKE, FACT, HARV and
 venv/bin/python tools/tdgym/train/ppo.py --run-dir runs/NAME --envs N --total-steps 20000000
 ```
 
+`--ai-difficulty easy|normal|hard` (also on `evaluate.py`, `ai_difficulty=` on the envs and
+`--ai-difficulty 0-2` on tdbench) sets the built-in AI's handicap, which scales its
+firepower, armor, speed, rate of fire, costs and build speed. Normal is the default and
+plays exactly as before; the scripted baseline averages -10.75 / -11.30 / -11.76 return
+against easy / normal / hard over 6 games each. Remaster builds have no difficulty rules
+of their own, so tdhost passes the vanilla game's easy and hard values through `CNC_Config`.
+
 `--device auto` picks CUDA, then MPS, then CPU. `--envs` is one game per process; use
 about one per core and leave a few cores for the learner. Resume with `--resume runs/NAME/latest.pt`.
 Progress is in `runs/NAME/metrics.csv` (one row per update); watch `win_rate`,

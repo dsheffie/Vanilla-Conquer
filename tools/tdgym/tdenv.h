@@ -103,9 +103,10 @@ int tdenv_open(const char* lib, const char* data, const char* disc, const char* 
 /*
 ** Start a new game on multiplayer map 'map' (e.g. 1 for SCM01EA) against num_ais AI
 ** players. agent_side is 0 for GDI, 1 for Nod; AI sides alternate starting with the
-** other one. A non-zero seed makes the game reproducible. Returns 0 on success.
+** other one. A non-zero seed makes the game reproducible. ai_difficulty is 0 easy, 1 normal
+** or 2 hard. Returns 0 on success.
 */
-int tdenv_reset(int map, int num_ais, unsigned seed, int agent_side, int credits);
+int tdenv_reset(int map, int num_ais, unsigned seed, int agent_side, int credits, int ai_difficulty);
 
 /* Size of the playable grid. */
 int tdenv_grid_size(int* width, int* height);

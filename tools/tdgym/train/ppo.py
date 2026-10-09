@@ -54,6 +54,7 @@ def parse_args():
     p.add_argument("--device", default="auto", help="auto, mps, cuda or cpu")
     p.add_argument("--seed", type=int, default=1)
     p.add_argument("--map", type=int, default=1)
+    p.add_argument("--ai-difficulty", default="normal", choices=["easy", "normal", "hard"])
     p.add_argument("--max-minutes", type=float, default=30)
     p.add_argument("--decision-frames", type=int, default=30)
     p.add_argument("--save-every", type=int, default=50, help="updates between numbered checkpoints")
@@ -68,7 +69,10 @@ def parse_args():
 def make_env(args):
     def thunk():
         return make_macro_env(
-            decision_frames=args.decision_frames, max_minutes=args.max_minutes, map_number=args.map
+            decision_frames=args.decision_frames,
+            max_minutes=args.max_minutes,
+            map_number=args.map,
+            ai_difficulty=args.ai_difficulty,
         )
 
     return thunk
@@ -351,7 +355,7 @@ def report_benchmark(args, out_dir, device, wall_s, setup_s, decisions, updates,
         "settings": {
             "device": str(device), "envs": args.envs, "steps": args.steps, "total_steps": args.total_steps,
             "decision_frames": args.decision_frames, "epochs": args.epochs, "minibatches": args.minibatches,
-            "map": args.map, "seed": args.seed,
+            "map": args.map, "seed": args.seed, "ai_difficulty": args.ai_difficulty,
         },
         "results": {
             "wall_s": round(wall_s, 1),

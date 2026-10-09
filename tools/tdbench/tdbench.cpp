@@ -21,6 +21,7 @@ struct Options
     int AIs = 2;
     int Map = 1;
     int Credits = 5000;
+    int AIDifficulty = 1;
     unsigned Seed = 0; // 0 leaves the library's fixed starting state.
     int Games = 1;
     bool Reload = false;
@@ -45,7 +46,7 @@ static void Usage(const char* prog)
 {
     fprintf(stderr,
             "usage: %s --lib PATH --data DIR [--disc gdi|nod] [--work DIR] [--ais N] [--map N] [--credits N] [--seed N]\n"
-            "       [--games N] [--reload] [--frames N] [--verbose] [--dump-objects]\n"
+            "       [--ai-difficulty 0-2] [--games N] [--reload] [--frames N] [--verbose] [--dump-objects]\n"
             "  --lib      path to " TDHOST_LIB_NAME "\n"
             "  --data     directory holding the game .MIX files, either flat or with gdi/ and nod/ disc folders\n"
             "  --disc     disc folder to take GENERAL.MIX and MOVIES.MIX from (default gdi)\n"
@@ -53,6 +54,7 @@ static void Usage(const char* prog)
             "  --ais      number of AI players, 2-%d (default 2)\n"
             "  --map      multiplayer scenario number, e.g. 1 for SCM01EA (default 1)\n"
             "  --credits  starting credits (default 5000)\n"
+            "  --ai-difficulty  0 easy, 1 normal, 2 hard (default 1)\n"
             "  --seed     random seed; runs with the same seed and settings play identically\n"
             "  --games    games to play back to back in this process; game g uses seed + g (default 1)\n"
             "  --reload   reload the library between games for a completely fresh game state\n"
@@ -98,6 +100,8 @@ static bool Parse_Args(int argc, char** argv, Options& opt)
             opt.Map = atoi(val);
         } else if (arg == "--credits") {
             opt.Credits = atoi(val);
+        } else if (arg == "--ai-difficulty") {
+            opt.AIDifficulty = atoi(val);
         } else if (arg == "--seed") {
             opt.Seed = (unsigned)strtoul(val, nullptr, 0);
         } else if (arg == "--games") {
@@ -206,6 +210,7 @@ int main(int argc, char** argv)
         tdhost::SkirmishSettings settings;
         settings.Map = opt.Map;
         settings.Credits = opt.Credits;
+        settings.AIDifficulty = opt.AIDifficulty;
         settings.Seed = opt.Seed != 0 ? opt.Seed + g : 0;
         for (int i = 0; i < opt.AIs; ++i) {
             settings.Players.push_back({true, i % 2}); // Alternate GDI and Nod.

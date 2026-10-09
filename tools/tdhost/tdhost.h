@@ -53,6 +53,7 @@ struct SkirmishSettings
     int Map = 1; // Multiplayer scenario number, e.g. 1 for SCM01EA.
     int Credits = 5000;
     unsigned Seed = 0; // 0 leaves the library's fixed starting state.
+    int AIDifficulty = 1; // AI players: 0 easy, 1 normal, 2 hard.
     std::vector<PlayerSetup> Players;
 };
 
@@ -92,6 +93,8 @@ public:
     void(__cdecl* Set_Random_Seed)(unsigned int) = nullptr;
     void(__cdecl* Set_Headless)(bool) = nullptr;
     void(__cdecl* Free_Game)(void) = nullptr;
+    void(__cdecl* Set_AI_Difficulty)(int) = nullptr;
+    void(__cdecl* Config)(const CNCRulesDataStruct&) = nullptr;
     bool(__cdecl* Get_Visible_Page)(unsigned char*, unsigned int&, unsigned int&) = nullptr;
     bool(__cdecl* Get_Palette)(unsigned char (&)[256][3]) = nullptr;
     void(__cdecl* Handle_Input)(InputRequestEnum, unsigned char, uint64_t, int, int, int, int) = nullptr;

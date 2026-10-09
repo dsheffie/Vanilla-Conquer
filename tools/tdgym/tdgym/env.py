@@ -77,6 +77,20 @@ def _work_root():
     return None
 
 
+AI_DIFFICULTIES = ("easy", "normal", "hard")
+
+
+def ai_difficulty_level(value):
+    """0, 1 or 2 from a level or one of AI_DIFFICULTIES."""
+    if isinstance(value, str):
+        if value not in AI_DIFFICULTIES:
+            raise ValueError("ai_difficulty must be one of %s" % (AI_DIFFICULTIES,))
+        return AI_DIFFICULTIES.index(value)
+    if value not in (0, 1, 2):
+        raise ValueError("ai_difficulty must be 0, 1 or 2")
+    return int(value)
+
+
 def _env_path(value, variable):
     value = value or os.environ.get(variable)
     if not value:
@@ -88,6 +102,8 @@ class TiberianDawnEnv(gym.Env):
     """
     The agent plays player 0 of a multiplayer skirmish against built-in AI players, with
     the information a human would have: other houses' objects only show in explored cells.
+    ai_difficulty ("easy", "normal", "hard" or 0-2) scales the AI players' firepower, armor,
+    speed, rate of fire, costs and build speed by the game rules' difficulty settings.
 
     Observation (dict):
       map:        uint8 (len(PLANES), 64, 64), see PLANES; grid cell [y, x].
@@ -125,6 +141,7 @@ class TiberianDawnEnv(gym.Env):
         disc="gdi",
         map_number=1,
         num_ais=1,
+        ai_difficulty="normal",
         agent_side=0,
         credits=5000,
         frame_skip=15,
@@ -151,6 +168,7 @@ class TiberianDawnEnv(gym.Env):
         )
         self.map_number = map_number
         self.num_ais = num_ais
+        self.ai_difficulty = ai_difficulty_level(ai_difficulty)
         self.agent_side = agent_side
         self.credits = credits
         self.frame_skip = frame_skip
@@ -178,7 +196,9 @@ class TiberianDawnEnv(gym.Env):
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed)
         game_seed = int(self.np_random.integers(1, 2**31))
-        self._native.reset(self.map_number, self.num_ais, game_seed, self.agent_side, self.credits)
+        self._native.reset(
+            self.map_number, self.num_ais, game_seed, self.agent_side, self.credits, self.ai_difficulty
+        )
         self._status = _native.RUNNING
         self._capture()
         return self._observation(), self._info(action_valid=True, game_seed=game_seed)
