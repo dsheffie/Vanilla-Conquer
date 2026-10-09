@@ -54,8 +54,21 @@ bool Debug_Write_Shape(const char* file_name,
                        void const* ghostdata = NULL);
 
 typedef void(__cdecl* CNC_Event_Callback_Type)(const EventCallbackStruct& event);
-typedef unsigned __int64 uint64;
-typedef __int64 int64;
+typedef uint64_t uint64;
+typedef int64_t int64;
+
+#ifndef _WIN32
+#include <chrono>
+
+/*
+** Millisecond clock standing in for the Win32 multimedia timer.
+*/
+static unsigned timeGetTime(void)
+{
+    auto now = std::chrono::steady_clock::now().time_since_epoch();
+    return unsigned(std::chrono::duration_cast<std::chrono::milliseconds>(now).count());
+}
+#endif
 
 /*
 ** Audio defines
@@ -201,6 +214,8 @@ extern "C" __declspec(dllexport) void __cdecl CNC_Set_Difficulty(int difficulty)
 extern "C" __declspec(dllexport) void __cdecl CNC_Handle_Player_Switch_To_AI(uint64 player_id);
 extern "C" __declspec(dllexport) void __cdecl CNC_Handle_Human_Team_Wins(uint64 player_id);
 extern "C" __declspec(dllexport) void __cdecl CNC_Start_Mission_Timer(int time);
+extern "C" __declspec(dllexport) void __cdecl CNC_Set_Random_Seed(unsigned int seed);
+extern "C" __declspec(dllexport) void __cdecl CNC_Set_Headless(bool headless);
 extern "C" __declspec(dllexport) bool __cdecl CNC_Get_Start_Game_Info(uint64 player_id,
                                                                       int& start_location_waypoint_index);
 
@@ -336,7 +351,7 @@ public:
     static void Adjust_Internal_View(bool force_ignore_view_constraints = false);
     static void Logic_Switch_Player_Context(ObjectClass* object);
     static void Logic_Switch_Player_Context(HouseClass* house);
-    static __int64 Get_GlyphX_Player_ID(const HouseClass* house);
+    static int64 Get_GlyphX_Player_ID(const HouseClass* house);
 
     static void Recalculate_Placement_Distances();
 
@@ -1928,6 +1943,37 @@ extern "C" __declspec(dllexport) void __cdecl CNC_Start_Mission_Timer(int time)
 }
 
 /**************************************************************************************************
+ * CNC_Set_Random_Seed -- Seed the game's random number generators
+ *
+ * The dll never runs Init_Random(), so without this every game starts from the same random
+ * state and plays out identically. Call before starting an instance, since scenario start
+ * already draws random numbers (e.g. for starting positions).
+ **************************************************************************************************/
+extern unsigned int RandNumb;
+
+extern "C" __declspec(dllexport) void __cdecl CNC_Set_Random_Seed(unsigned int seed)
+{
+    Seed = seed;
+    Scen.RandomNumber = seed;
+    RandNumb = seed;
+}
+
+/**************************************************************************************************
+ * CNC_Set_Headless -- Never draw the legacy game screen
+ *
+ * With fewer than two human players the dll draws the original game screen every frame, for
+ * the remaster's legacy view. A host with no display, such as a simulation benchmark or
+ * training environment, can turn that off; it also stops the screen's view constraints from
+ * applying to input coordinates.
+ **************************************************************************************************/
+static bool Headless = false;
+
+extern "C" __declspec(dllexport) void __cdecl CNC_Set_Headless(bool headless)
+{
+    Headless = headless;
+}
+
+/**************************************************************************************************
  * CNC_Get_Start_Game_Info
  *
  * History: 8/31/2020 11:37AM - ST
@@ -2906,7 +2952,7 @@ extern "C" __declspec(dllexport) bool __cdecl CNC_Get_Game_State(GameStateReques
                 int icon = 0;
                 void* image_data = 0;
                 if (cellptr->Get_Template_Info(cell_name, icon, image_data)) {
-                    itoa(icon, icon_number, 10);
+                    snprintf(icon_number, sizeof(icon_number), "%d", icon);
                     strncat(cell_name, "_i", 32);
                     strncat(cell_name, icon_number, 32);
                     strncat(cell_name, ".tga", 32);
@@ -5562,7 +5608,7 @@ bool DLLExportClass::Get_Shroud_State(uint64 player_id, unsigned char* buffer_in
  **************************************************************************************************/
 bool DLLExportClass::Get_Occupier_State(uint64 player_id, unsigned char* buffer_in, unsigned int buffer_size)
 {
-    UNREFERENCED_PARAMETER(player_id);
+    (void)player_id;
 
     CNCOccupierHeaderStruct* occupiers = (CNCOccupierHeaderStruct*)buffer_in;
     CNCOccupierEntryHeaderStruct* entry = reinterpret_cast<CNCOccupierEntryHeaderStruct*>(occupiers + 1U);
@@ -6332,7 +6378,7 @@ void DLLExportClass::Calculate_Start_Positions(void)
  *
  * History: 4/22/2019 6:23PM - ST
  **************************************************************************************************/
-__int64 DLLExportClass::Get_GlyphX_Player_ID(const HouseClass* house)
+int64 DLLExportClass::Get_GlyphX_Player_ID(const HouseClass* house)
 {
     /*
     ** C&C relies a lot on PlayerPtr, which is a pointer to the 'local' player's house. Historically, in a peer-to-peer
@@ -7259,6 +7305,9 @@ void DLLExportClass::Debug_Heal_Unit(int x, int y)
  **************************************************************************************************/
 bool DLLExportClass::Legacy_Render_Enabled(void)
 {
+    if (Headless) {
+        return false;
+    }
     if (GameToPlay == GAME_GLYPHX_MULTIPLAYER) {
         unsigned int num_humans = 0U;
         for (int i = 0; i < MPlayerCount; ++i) {
@@ -7694,7 +7743,7 @@ void DLLExportClass::Decode_Pointers(void)
         Sidebar_Glyphx_Decode_Pointers(&MultiplayerSidebars[i]);
 
         if (PlacementType[i]) {
-            StructType type = (StructType) reinterpret_cast<unsigned int>(PlacementType[i]);
+            StructType type = (StructType) reinterpret_cast<uintptr_t>(PlacementType[i]);
             PlacementType[i] = NULL;
             if (type >= STRUCT_FIRST && type < STRUCT_COUNT) {
 

@@ -112,9 +112,14 @@ set(COMMONR_SRC
     soundio_null.cpp
     video_null.cpp
     wwkeyboard.cpp
-    wwkeyboard_win32.cpp
     wwmouse.cpp
 )
+
+if(WIN32)
+    list(APPEND COMMONR_SRC wwkeyboard_win32.cpp)
+else()
+    list(APPEND COMMONR_SRC wwkeyboard_null.cpp)
+endif()
 
 set(COMMONV_SRC
     framelimit.cpp
@@ -187,6 +192,8 @@ if(BUILD_REMASTERTD OR BUILD_REMASTERRA)
     add_library(commonr STATIC ${COMMONR_SRC})
     target_compile_definitions(commonr PUBLIC $<$<CONFIG:Debug>:_DEBUG> ${REMASTER_DEFS})
     target_link_libraries(commonr PUBLIC common ${REMASTER_LIBS})
+    # Both get linked into the remaster shared library.
+    set_target_properties(common commonr PROPERTIES POSITION_INDEPENDENT_CODE ON)
 endif()
 
 # These options currently require directx components from the aug 2007 SDK.

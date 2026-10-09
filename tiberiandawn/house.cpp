@@ -887,7 +887,7 @@ extern void Logic_Switch_Player_Context(HouseClass* house);
  *   07/17/1995 JLB : Limits EVA speaking unless the player can do something.                  *
  *=============================================================================================*/
 extern void Recalculate_Placement_Distances();
-extern void On_Message(const char* message, float timeout_seconds, long long message_id);
+extern void On_Message(const char* message, float timeout_seconds, int64_t message_id);
 
 void HouseClass::AI(void)
 {
@@ -4023,6 +4023,7 @@ void HouseClass::MPlayer_Defeated(void)
     HouseClass* hptr2;
     int num_alive;
     int num_humans;
+    bool had_humans; // Any player was human at some point, so not an AI-only match.
     int all_allies;
     int max_index;
     int max_count;
@@ -4124,8 +4125,12 @@ void HouseClass::MPlayer_Defeated(void)
     ------------------------------------------------------------------------*/
     num_alive = 0;
     num_humans = 0;
+    had_humans = false;
     for (i = 0; i < MPlayerMax; i++) {
         hptr = HouseClass::As_Pointer((HousesType)(HOUSE_MULTI1 + i));
+        if (hptr && (hptr->IsHuman || hptr->WasHuman)) {
+            had_humans = true;
+        }
         if (hptr && hptr->IsDefeated == 0) {
             if (hptr->IsHuman)
                 num_humans++;
@@ -4169,13 +4174,14 @@ void HouseClass::MPlayer_Defeated(void)
         num_alive = 1;
 
     /*------------------------------------------------------------------------
-    If there's only one human player left or no humans left, the game is over:
+    If there's only one human player left or no humans left, the game is over.
+    An AI-only match has no humans to begin with, so it plays on until one is left:
     - Determine whether this player wins or loses, based on the state of the
       MPlayerObiWan flag
     - Find all players' indices in the MPlayerScore array
     - Tally up scores for this game
     ------------------------------------------------------------------------*/
-    if (num_alive == 1 || num_humans == 0) {
+    if (num_alive == 1 || (num_humans == 0 && had_humans)) {
         if (PlayerPtr->IsDefeated) {
             PlayerLoses = true;
         } else {

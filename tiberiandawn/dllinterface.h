@@ -18,6 +18,17 @@
 #ifndef DLL_INTERFACE_H
 #define DLL_INTERFACE_H
 
+#include <stdint.h>
+
+#ifndef _WIN32
+/*
+** MSVC-only keywords used by the exported interface. On other platforms export
+** the symbols with default visibility and use the platform calling convention.
+*/
+#define __declspec(x) __attribute__((visibility("default")))
+#define __cdecl
+#endif
+
 struct CarryoverObjectStruct;
 
 /*
@@ -568,7 +579,7 @@ struct GameOverMultiPlayerStatsStruct
         , Score(0)
     {
     }
-    __int64 GlyphXPlayerID;
+    int64_t GlyphXPlayerID;
     bool IsHuman;
     bool WasHuman;
     bool IsWinner;
@@ -592,7 +603,7 @@ enum EventCallbackMessageEnum
 struct EventCallbackStruct
 {
 
-    EventCallbackStruct::EventCallbackStruct(void)
+    EventCallbackStruct(void)
         : EventType(CALLBACK_EVENT_INVALID)
         , GlyphXPlayerID(0)
     {
@@ -600,120 +611,132 @@ struct EventCallbackStruct
 
     EventCallbackType EventType;
 
-    __int64 GlyphXPlayerID;
+    int64_t GlyphXPlayerID;
+
+    struct SoundEffectEvent
+    {
+        int SFXIndex;
+        int Variation;
+        int PixelX;
+        int PixelY;
+        int PlayerID; // TO_FIX
+        char SoundEffectName[16];
+        int SoundEffectPriority;
+        int SoundEffectContext;
+    };
+
+    struct SpeechEvent
+    {
+        int SpeechIndex;
+        int PlayerID; // TO_FIX
+        char SpeechName[16];
+    };
+
+    struct GameOverEvent
+    {
+        bool Multiplayer;
+        //
+        // Single-player data
+        //
+        bool IsHuman;
+        bool PlayerWins;
+        const char* MovieName;
+        const char* MovieName2;
+        const char* MovieName3;
+        const char* MovieName4;
+        const char* AfterScoreMovieName;
+        int Score;
+        int Leadership;
+        int Efficiency;
+        int CategoryTotal;
+        int NODKilled;
+        int GDIKilled;
+        int CiviliansKilled;
+        int NODBuildingsDestroyed;
+        int GDIBuildingsDestroyed;
+        int CiviliansBuildingsDestroyed;
+        int RemainingCredits;
+        int SabotagedStructureType;
+        int TimerRemaining;
+        //
+        // Multi-player data
+        //
+        int MultiPlayerTotalPlayers;
+        GameOverMultiPlayerStatsStruct MultiPlayerPlayersData[GAME_OVER_MULTIPLAYER_MAX_PLAYERS_TRACKED];
+    };
+
+    struct DebugPrintEvent
+    {
+        const char* PrintString;
+    };
+
+    struct MovieEvent
+    {
+        const char* MovieName;
+        int Theme;
+        bool Immediate;
+    };
+
+    struct MessageEvent
+    {
+        const char* Message;
+        float TimeoutSeconds;
+        EventCallbackMessageEnum MessageType;
+        int64_t MessageParam1;
+    };
+
+    struct UpdateMapCellEvent
+    {
+        int CellX;
+        int CellY;
+        char TemplateTypeName[32];
+    };
+
+    struct AchievementEvent
+    {
+        const char* AchievementType;
+        const char* AchievementReason;
+    };
+
+    struct StoreCarryoverObjectsEvent
+    {
+        CarryoverObjectStruct* CarryoverList;
+    };
+
+    struct SpecialWeaponTargettingEvent
+    {
+        int Type;
+        int ID;
+        char Name[16];
+        DllSuperweaponTypeEnum WeaponType;
+    };
+
+    struct CenterCameraEvent
+    {
+        int CoordX;
+        int CoordY;
+    };
+
+    struct PingEvent
+    {
+        int CoordX;
+        int CoordY;
+    };
 
     union
     {
-
-        struct SoundEffectEvent
-        {
-            int SFXIndex;
-            int Variation;
-            int PixelX;
-            int PixelY;
-            int PlayerID; // TO_FIX
-            char SoundEffectName[16];
-            int SoundEffectPriority;
-            int SoundEffectContext;
-        } SoundEffect;
-
-        struct SpeechEvent
-        {
-            int SpeechIndex;
-            int PlayerID; // TO_FIX
-            char SpeechName[16];
-        } Speech;
-
-        struct GameOverEvent
-        {
-            bool Multiplayer;
-            //
-            // Single-player data
-            //
-            bool IsHuman;
-            bool PlayerWins;
-            const char* MovieName;
-            const char* MovieName2;
-            const char* MovieName3;
-            const char* MovieName4;
-            const char* AfterScoreMovieName;
-            int Score;
-            int Leadership;
-            int Efficiency;
-            int CategoryTotal;
-            int NODKilled;
-            int GDIKilled;
-            int CiviliansKilled;
-            int NODBuildingsDestroyed;
-            int GDIBuildingsDestroyed;
-            int CiviliansBuildingsDestroyed;
-            int RemainingCredits;
-            int SabotagedStructureType;
-            int TimerRemaining;
-            //
-            // Multi-player data
-            //
-            int MultiPlayerTotalPlayers;
-            GameOverMultiPlayerStatsStruct MultiPlayerPlayersData[GAME_OVER_MULTIPLAYER_MAX_PLAYERS_TRACKED];
-        } GameOver;
-
-        struct DebugPrintEvent
-        {
-            const char* PrintString;
-        } DebugPrint;
-
-        struct MovieEvent
-        {
-            const char* MovieName;
-            int Theme;
-            bool Immediate;
-        } Movie;
-
-        struct MessageEvent
-        {
-            const char* Message;
-            float TimeoutSeconds;
-            EventCallbackMessageEnum MessageType;
-            __int64 MessageParam1;
-        } Message;
-
-        struct UpdateMapCellEvent
-        {
-            int CellX;
-            int CellY;
-            char TemplateTypeName[32];
-        } UpdateMapCell;
-
-        struct AchievementEvent
-        {
-            const char* AchievementType;
-            const char* AchievementReason;
-        } Achievement;
-
-        struct StoreCarryoverObjectsEvent
-        {
-            CarryoverObjectStruct* CarryoverList;
-        } StoreCarryoverObjects;
-
-        struct SpecialWeaponTargettingEvent
-        {
-            int Type;
-            int ID;
-            char Name[16];
-            DllSuperweaponTypeEnum WeaponType;
-        } SpecialWeaponTargetting;
-
-        struct CenterCameraEvent
-        {
-            int CoordX;
-            int CoordY;
-        } CenterCamera;
-
-        struct PingEvent
-        {
-            int CoordX;
-            int CoordY;
-        } Ping;
+        SoundEffectEvent SoundEffect;
+        SpeechEvent Speech;
+        GameOverEvent GameOver;
+        DebugPrintEvent DebugPrint;
+        MovieEvent Movie;
+        MessageEvent Message;
+        UpdateMapCellEvent UpdateMapCell;
+        AchievementEvent Achievement;
+        StoreCarryoverObjectsEvent StoreCarryoverObjects;
+        SpecialWeaponTargettingEvent SpecialWeaponTargetting;
+        CenterCameraEvent CenterCamera;
+        PingEvent Ping;
     };
 };
 
@@ -762,7 +785,7 @@ struct CNCPlayerInfoStruct
     char Name[64];
     unsigned char House;
     int ColorIndex;
-    unsigned __int64 GlyphxPlayerID;
+    uint64_t GlyphxPlayerID;
     int Team;
     int StartLocationIndex;
     unsigned char HomeCellX;

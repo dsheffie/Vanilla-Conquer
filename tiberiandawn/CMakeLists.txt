@@ -175,15 +175,18 @@ if(BUILD_REMASTERTD)
     endif()
     add_library(TiberianDawn SHARED 
         dllinterface.cpp
-        dllinterfaceeditor.cpp
         sidebarglyphx.cpp
         ${TIBDAWN_SRC}
         ${TIBDAWN_HEADERS}
         ${REMASTERTD_RC}
     )
+    if(WIN32 OR CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        # The map editor interface passes data to the remaster as COM SAFEARRAYs.
+        target_sources(TiberianDawn PRIVATE dllinterfaceeditor.cpp)
+    endif()
     target_compile_definitions(TiberianDawn PUBLIC $<$<CONFIG:Debug>:_DEBUG> ${REMASTER_DEFS} MEGAMAPS)
     target_include_directories(TiberianDawn PUBLIC ${CMAKE_SOURCE_DIR} .)
-    target_link_libraries(TiberianDawn commonr ${REMASTER_LIBS} ${STATIC_LIBS})
+    target_link_libraries(TiberianDawn commonr ${REMASTER_LIBS} ${STATIC_LIBS} ${CMAKE_DL_LIBS})
     set_target_properties(TiberianDawn PROPERTIES PREFIX "")
 
     add_custom_command(TARGET TiberianDawn POST_BUILD

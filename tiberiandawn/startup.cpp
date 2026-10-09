@@ -50,6 +50,9 @@ extern void Create_Main_Window(HANDLE instance, int width, int height);
 HINSTANCE ProgramInstance;
 #else
 #include <unistd.h>
+#ifdef REMASTER_BUILD
+#include <dlfcn.h>
+#endif
 #endif
 
 extern int ReadyToQuit;
@@ -114,6 +117,15 @@ BOOL WINAPI DllMain(HINSTANCE instance, unsigned int fdwReason, void* lpvReserve
 #ifdef REMASTER_BUILD
 int main(int, char*[]);
 
+static void DLL_Startup_Error(const char* message)
+{
+#ifdef _WIN32
+    MessageBoxA(NULL, message, "Command & Conquer", MB_ICONEXCLAMATION | MB_OK);
+#else
+    fprintf(stderr, "Command & Conquer: %s\n", message);
+#endif
+}
+
 int DLL_Startup(const char* command_line_in)
 {
     /* Construct argc and argv from command_line_in. Remaster build requires
@@ -123,7 +135,9 @@ int DLL_Startup(const char* command_line_in)
     ** a crash trying to read the font files. */
 
     RunningAsDLL = true;
+#ifdef _WIN32
     HINSTANCE instance = ProgramInstance;
+#endif
     char command_line[1024];
     int argc = 0;
     unsigned command_scan;
@@ -132,16 +146,29 @@ int DLL_Startup(const char* command_line_in)
     char path_to_exe[280];
 
     strcpy(command_line, command_line_in);
-    ProgramInstance = instance;
 
     /*
     ** Get the full path to the .DLL
     */
+#ifdef _WIN32
+    ProgramInstance = instance;
     DWORD readed = GetModuleFileNameA(instance, &path_to_exe[0], 280);
     if (readed >= 280 - 1) {
-        MessageBoxA(NULL, "Path to remaster is too large.", "Command & Conquer", MB_ICONEXCLAMATION | MB_OK);
+        DLL_Startup_Error("Path to remaster is too large.");
         return -1;
     }
+#else
+    Dl_info info;
+    if (!dladdr((void*)&DLL_Startup, &info) || info.dli_fname == nullptr) {
+        DLL_Startup_Error("Could not determine path to remaster library.");
+        return -1;
+    }
+    if (strlen(info.dli_fname) >= sizeof(path_to_exe)) {
+        DLL_Startup_Error("Path to remaster is too large.");
+        return -1;
+    }
+    strcpy(path_to_exe, info.dli_fname);
+#endif
 
     /*
     ** First argument is supposed to be a pointer to the .EXE that is running
@@ -190,7 +217,7 @@ int DLL_Startup(const char* command_line_in)
     } while (command_char != 0 && command_char != 13 && argc < 20);
 
     if (argc >= 20) {
-        MessageBoxA(NULL, "Too many arguments on command line.", "Command & Conquer", MB_ICONEXCLAMATION | MB_OK);
+        DLL_Startup_Error("Too many arguments on command line.");
         return -1;
     }
 

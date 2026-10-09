@@ -85,7 +85,7 @@ void PathsClass::Init(const char* suffix, const char* ini_name, const char* data
     ini.Load(file);
 
     const char section[] = "Paths";
-    char buffer[128]; // TODO max ini line size.
+    char buffer[INIClass::MAX_LINE_LENGTH];
 
     // Even if the config was found with the binary, we still check to see if it gives use alternative paths.
     // If not, assume we are in portable mode and point the DataPath to ProgramPath.
