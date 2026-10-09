@@ -283,9 +283,28 @@ def main():
         timing["logging"] += time.time() - t_log
 
     wall_s = time.time() - start
+    env_memory = env_process_memory(envs) if args.benchmark else None
     envs.close()
     if args.benchmark:
-        report_benchmark(args, benchmark_dir, device, wall_s, setup_s, global_step - start_step, update, timing)
+        report_benchmark(args, benchmark_dir, device, wall_s, setup_s, global_step - start_step, update, timing, env_memory)
+
+
+def env_process_memory(envs):
+    """Memory of each live env process in MB: proportional set size on Linux, so pages
+    shared with the trainer after fork are split rather than counted in full, and resident
+    size elsewhere."""
+    sizes = []
+    for process in getattr(envs, "processes", []):
+        try:
+            if sys.platform.startswith("linux"):
+                with open("/proc/%d/smaps_rollup" % process.pid) as f:
+                    kb = next(int(line.split()[1]) for line in f if line.startswith("Pss:"))
+            else:
+                kb = int(subprocess.run(["ps", "-o", "rss=", "-p", str(process.pid)], capture_output=True, text=True).stdout)
+            sizes.append(kb // 1024)
+        except (OSError, ValueError, StopIteration):
+            pass
+    return sizes
 
 
 def machine_info(device):
@@ -318,10 +337,11 @@ def machine_info(device):
     return info
 
 
-def report_benchmark(args, out_dir, device, wall_s, setup_s, decisions, updates, timing):
+def report_benchmark(args, out_dir, device, wall_s, setup_s, decisions, updates, timing, env_memory):
     # ru_maxrss is bytes on macOS and kilobytes on Linux.
     scale = 1 if sys.platform == "darwin" else 1024
     peak = lambda who: round(resource.getrusage(who).ru_maxrss * scale / 2**20)  # noqa: E731
+    env_memory = env_memory or [0]
     result = {
         "machine": machine_info(device),
         "settings": {
@@ -339,7 +359,11 @@ def report_benchmark(args, out_dir, device, wall_s, setup_s, decisions, updates,
             "seconds": {k: round(v, 1) for k, v in timing.items()},
             "share": {k: round(v / wall_s, 3) for k, v in timing.items()},
             "update_ms": round(1000 * timing["update"] / max(updates, 1)),
-            "peak_rss_mb": {"trainer": peak(resource.RUSAGE_SELF), "largest_env_process": peak(resource.RUSAGE_CHILDREN)},
+            "memory_mb": {
+                "trainer_peak": peak(resource.RUSAGE_SELF),
+                "env_process_largest": max(env_memory),
+                "env_processes_total": sum(env_memory),
+            },
         },
     }
     r = result["results"]
@@ -349,7 +373,7 @@ def report_benchmark(args, out_dir, device, wall_s, setup_s, decisions, updates,
           % (r["decisions_per_s"], r["game_frames_per_s"], r["update_ms"]))
     for phase in ("env_step", "inference", "update", "bookkeeping", "logging"):
         print("  %-12s %6.1f s  %5.1f%%" % (phase, timing[phase], 100 * timing[phase] / wall_s))
-    print("  peak memory: trainer %d MB, largest env process %d MB" % tuple(r["peak_rss_mb"].values()))
+    print("  memory: trainer peak %d MB, env processes largest %d MB, total %d MB" % tuple(r["memory_mb"].values()))
     if out_dir:
         with open(os.path.join(out_dir, "benchmark.json"), "w") as f:
             json.dump(result, f, indent=2)
