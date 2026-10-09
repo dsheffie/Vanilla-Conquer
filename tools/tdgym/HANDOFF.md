@@ -37,22 +37,54 @@ Windows is untested for these tools (they're excluded from Windows builds).
 
 ### 2. Game data
 
-EA's freeware Command & Conquer Gold CDs (GDI and NOD ISOs, e.g. from ModDB). Lay the data out as:
+The data comes from EA's freeware Command & Conquer Gold CDs, one ISO per disc:
+
+1. **Download the ISOs.** The GDI and NOD discs are linked from the top-level README
+   ("Running"), on ModDB:
+   [GDI](https://www.moddb.com/games/cc-gold/downloads/command-conquer-gold-free-game-gdi-iso),
+   [NOD](https://www.moddb.com/games/cc-gold/downloads/command-conquer-gold-free-game-nod-iso).
+   ModDB sits behind a Cloudflare check, so `curl`/`wget` get a challenge page instead of
+   the file: download in a browser and copy the ISOs over (each is about 600 MB; the
+   original files are `CnC_GDI95.iso` and `CnC_NOD95.iso`).
+
+2. **Install the two tools** the script needs:
+
+   ```sh
+   sudo apt install libarchive-tools      # bsdtar, reads ISOs without mounting; built into macOS
+   cargo install unshield                 # agrif's InstallShield 3 extractor, for INSTALL/SETUP.Z
+   ```
+
+   `cargo` comes from [rustup](https://rustup.rs) if the machine doesn't have it.
+
+3. **Build the data directory:**
+
+   ```sh
+   tools/tdgym/setup_data.sh CnC_GDI95.iso CnC_NOD95.iso /path/to/data
+   ```
+
+   It needs about 2 GB of temporary space (in `$TMPDIR`) and writes about 900 MB. It ends
+   with `Done: 15 shared files, gdi: GENERAL.MIX MOVIES.MIX nod: GENERAL.MIX MOVIES.MIX`.
+   Then check it with the `tdbench` hash in step 4.
+
+The script produces this layout, which you can also assemble by hand:
 
 ```
 data/
-  AUD.MIX CONQUER.MIX DESERT.MIX SCORES.MIX SOUNDS.MIX TEMPERAT.MIX WINTER.MIX   (disc root)
+  AUD.MIX CONQUER.MIX DESERT.MIX SCORES.MIX SOUNDS.MIX TEMPERAT.MIX WINTER.MIX   (GDI disc root)
   CCLOCAL.MIX UPDATE.MIX UPDATEC.MIX SPEECH.MIX TRANSIT.MIX                    (INSTALL/SETUP.Z)
   DESEICNH.MIX TEMPICNH.MIX WINTICNH.MIX                                       (INSTALL/SETUP.Z)
   gdi/GENERAL.MIX gdi/MOVIES.MIX                                               (GDI disc root)
   nod/GENERAL.MIX nod/MOVIES.MIX                                               (NOD disc root)
 ```
 
-`SETUP.Z` is an InstallShield 3 archive: `cargo install unshield` (agrif's crate), then
-`unshield extract INSTALL/SETUP.Z out/`. Use the `CCLOCAL.MIX` from SETUP.Z, not the one
-in `INSTALL/`. Everything except GENERAL.MIX and MOVIES.MIX is identical on both discs. The
-multiplayer maps (SCM01-09, 70-74, 77, 96) are inside GENERAL.MIX. tdhost presents this
-layout to the dll as one flat directory of links (`--disc` / `disc=` picks gdi or nod).
+Notes for doing it by hand:
+
+- Only GENERAL.MIX and MOVIES.MIX differ between the discs; the other root files are identical.
+- `SETUP.Z` is an InstallShield 3 archive (`unshield extract INSTALL/SETUP.Z out/` puts
+  the files under `out/C&C95/`). Use its `CCLOCAL.MIX`, not the one in `INSTALL/`.
+- File name case doesn't matter; the game looks files up case-insensitively.
+- The multiplayer maps (SCM01-09, 70-74, 77, 96) are inside GENERAL.MIX. tdhost presents
+  this layout to the dll as one flat directory of links (`--disc` / `disc=` picks gdi or nod).
 
 ### 3. Python
 
