@@ -23,7 +23,10 @@ const int FIRST_PLAYER_HOUSE = 4;
 std::string Error;
 std::string LibCopy;
 std::string DataDir;
-tdhost::GameLib Game;
+// Deliberately never destroyed. At process exit the game library's static destructors run
+// first (it was loaded after this library), so unloading it from a destructor here would
+// free the game a second time; exiting frees everything anyway.
+tdhost::GameLib& Game = *new tdhost::GameLib;
 bool Started = false;
 bool GameOver = false;
 int Frame = 0;
