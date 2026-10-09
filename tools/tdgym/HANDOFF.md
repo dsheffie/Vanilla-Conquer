@@ -159,6 +159,13 @@ cores with SMT siblings. The next speedup is structural rather than more envs: r
 updates while the games play the next rollout (they currently alternate), and step games
 asynchronously.
 
+Work directories (one per env: a copy of the library, its CONQUER.INI and links to the
+data) go to `$TDGYM_WORK_ROOT`, else `/dev/shm` on Linux, else the temp directory, and are
+deleted when the env closes or the process exits. Each game looks up files about 1,000
+times a second; on a very high core count machine moving work directories and data to
+`/dev/shm` gave a clear speedup, while on zen5 (12 envs) it made no measurable difference
+(1,443 vs 1,454 decisions/s). With many envs, also put the game data in `/dev/shm`.
+
 On Linux the env processes are forked from the trainer, so the kernel's peak-RSS for
 children counts pages shared with it; the benchmark reports env memory as proportional
 set size from `/proc/PID/smaps_rollup` instead.

@@ -287,6 +287,10 @@ def main():
     envs.close()
     if args.benchmark:
         report_benchmark(args, benchmark_dir, device, wall_s, setup_s, global_step - start_step, update, timing, env_memory)
+        if not benchmark_dir:
+            import shutil
+
+            shutil.rmtree(args.run_dir, ignore_errors=True)  # The temporary one made above.
 
 
 def env_process_memory(envs):

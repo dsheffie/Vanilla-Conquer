@@ -1,8 +1,11 @@
 """Gymnasium environment for Tiberian Dawn skirmishes against the built-in AI."""
 
 import os
+import shutil
+import sys
 import tempfile
 import warnings
+import weakref
 
 import gymnasium as gym
 import numpy as np
@@ -62,6 +65,18 @@ ACTION_KINDS = ("noop", "build", "place", "command", "stop", "sell", "cancel")
 MOBILE_TYPES = (INFANTRY, UNIT, AIRCRAFT)
 
 
+def _work_root():
+    """Where temporary work directories go: $TDGYM_WORK_ROOT, else /dev/shm on Linux, else
+    the usual temp directory. Each game looks files up ~1,000 times a second, and on
+    machines with many cores that contends on directory locks on a disk filesystem."""
+    root = os.environ.get("TDGYM_WORK_ROOT")
+    if root:
+        return root
+    if sys.platform.startswith("linux") and os.access("/dev/shm", os.W_OK):
+        return "/dev/shm"
+    return None
+
+
 def _env_path(value, variable):
     value = value or os.environ.get(variable)
     if not value:
@@ -114,11 +129,18 @@ class TiberianDawnEnv(gym.Env):
         reward_fn=None,
         render_mode=None,
     ):
+        if work_dir is None:
+            # Ours to delete: at close, or at exit if close is never called. Deleting the
+            # library copy while it is loaded is fine; the mapping stays valid.
+            work_dir = tempfile.mkdtemp(prefix="tdgym-", dir=_work_root())
+            self._cleanup = weakref.finalize(self, shutil.rmtree, work_dir, ignore_errors=True)
+        else:
+            self._cleanup = None
         self._native = _native.Native(
             _env_path(tdenv_lib or _native.default_library(), "TDGYM_TDENV"),
             _env_path(game_lib, "TDGYM_GAME_LIB"),
             _env_path(data, "TDGYM_DATA"),
-            work_dir or tempfile.mkdtemp(prefix="tdgym-"),
+            work_dir,
             disc,
         )
         self.map_number = map_number
@@ -187,6 +209,8 @@ class TiberianDawnEnv(gym.Env):
 
     def close(self):
         self._native.close()
+        if self._cleanup is not None:
+            self._cleanup()
         super().close()
 
     # Helpers for agents.
