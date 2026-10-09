@@ -242,7 +242,8 @@ class TiberianDawnEnv(gym.Env):
             else:
                 plane = PLANE[side + ("_infantry" if kind == INFANTRY else "_vehicles")]
                 grid[plane, y0, x0] = min(int(grid[plane, y0, x0]) + 1, 255)
-            health = int(255 * obj["strength"] / max(int(obj["max_strength"]), 1))
+            # Strength can exceed the type's maximum, so clamp to the plane's uint8 range.
+            health = min(max(int(255 * obj["strength"] / max(int(obj["max_strength"]), 1)), 0), 255)
             plane = PLANE[side + "_health"]
             grid[plane, y0:y1, x0:x1] = np.maximum(grid[plane, y0:y1, x0:x1], health)
 
