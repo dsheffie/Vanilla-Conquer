@@ -127,6 +127,20 @@ Progress is in `runs/NAME/metrics.csv` (one row per update); watch `win_rate`,
 `loss_rate`, `minutes`, `kills` and `losses`. Evaluate a checkpoint with
 `evaluate.py --policy runs/NAME/latest.pt --episodes 20`.
 
+### Videos
+
+`evaluate.py --video` records games with the real game graphics, as the agent sees them
+(its own shroud), against the built-in AI. Needs `ffmpeg`:
+
+```sh
+venv/bin/python tools/tdgym/train/evaluate.py --policy runs/NAME/latest.pt --episodes 1 --video game.mp4
+```
+
+Defaults: 8x real time at 30 fps, half size (696 x 588 on SCM01), so a 30-minute game is a
+4-minute, ~12 MB video; `--video-speed`, `--video-fps` and `--video-scale` change that.
+Recording one 30-minute game took 30 s on zen5. `--policy random` or `scripted` records
+the baselines. With several episodes, `game.mp4` becomes `game-1.mp4` and so on.
+
 ### 6. Benchmark
 
 Time a fixed amount of training, the same everywhere, to compare machines and settings:
