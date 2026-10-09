@@ -216,6 +216,7 @@ extern "C" __declspec(dllexport) void __cdecl CNC_Handle_Human_Team_Wins(uint64 
 extern "C" __declspec(dllexport) void __cdecl CNC_Start_Mission_Timer(int time);
 extern "C" __declspec(dllexport) void __cdecl CNC_Set_Random_Seed(unsigned int seed);
 extern "C" __declspec(dllexport) void __cdecl CNC_Set_Headless(bool headless);
+extern "C" __declspec(dllexport) void __cdecl CNC_Free_Game(void);
 extern "C" __declspec(dllexport) bool __cdecl CNC_Get_Start_Game_Info(uint64 player_id,
                                                                       int& start_location_waypoint_index);
 
@@ -1971,6 +1972,21 @@ static bool Headless = false;
 extern "C" __declspec(dllexport) void __cdecl CNC_Set_Headless(bool headless)
 {
     Headless = headless;
+}
+
+/**************************************************************************************************
+ * CNC_Free_Game -- Free the game's allocations before the library is unloaded
+ *
+ * On Windows DllMain does this when the dll is detached. Elsewhere a host that unloads the
+ * library, for example to start a fresh game, must call this first or the allocations leak.
+ * It has to run before the library's static destructors, so call it explicitly rather than
+ * from a destructor; nothing else may be called afterwards.
+ **************************************************************************************************/
+extern "C" __declspec(dllexport) void __cdecl CNC_Free_Game(void)
+{
+    DLL_Shutdown();
+    MFCD::Free_All();
+    Uninit_Game();
 }
 
 /**************************************************************************************************

@@ -177,6 +177,7 @@ bool GameLib::Load(const std::string& path, EventCallback callback, std::string&
               && Lookup(Handle, "CNC_Get_Game_State", Get_Game_State, error)
               && Lookup(Handle, "CNC_Set_Random_Seed", Set_Random_Seed, error)
               && Lookup(Handle, "CNC_Set_Headless", Set_Headless, error)
+              && Lookup(Handle, "CNC_Free_Game", Free_Game, error)
               && Lookup(Handle, "CNC_Handle_Input", Handle_Input, error)
               && Lookup(Handle, "CNC_Handle_Sidebar_Request", Handle_Sidebar_Request, error)
               && Lookup(Handle, "CNC_Handle_Structure_Request", Handle_Structure_Request, error)
@@ -195,6 +196,10 @@ bool GameLib::Load(const std::string& path, EventCallback callback, std::string&
 void GameLib::Unload()
 {
     if (Handle != nullptr) {
+        if (Free_Game != nullptr) {
+            Free_Game();
+            Free_Game = nullptr;
+        }
         dlclose(Handle);
         Handle = nullptr;
     }
