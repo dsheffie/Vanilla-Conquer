@@ -187,6 +187,10 @@ if(BUILD_REMASTERTD)
     target_compile_definitions(TiberianDawn PUBLIC $<$<CONFIG:Debug>:_DEBUG> ${REMASTER_DEFS} MEGAMAPS)
     target_include_directories(TiberianDawn PUBLIC ${CMAKE_SOURCE_DIR} .)
     target_link_libraries(TiberianDawn commonr ${REMASTER_LIBS} ${STATIC_LIBS} ${CMAKE_DL_LIBS})
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        # See common/CMakeLists.txt: without this the library can never be unloaded.
+        target_compile_options(TiberianDawn PRIVATE -fno-gnu-unique)
+    endif()
     set_target_properties(TiberianDawn PROPERTIES PREFIX "")
 
     add_custom_command(TARGET TiberianDawn POST_BUILD

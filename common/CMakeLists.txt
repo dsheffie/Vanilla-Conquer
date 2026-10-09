@@ -194,6 +194,12 @@ if(BUILD_REMASTERTD OR BUILD_REMASTERRA)
     target_link_libraries(commonr PUBLIC common ${REMASTER_LIBS})
     # Both get linked into the remaster shared library.
     set_target_properties(common commonr PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        # GCC makes template statics such as MixFileClass::MixList unique symbols, which stop
+        # dlclose from ever unloading the library; hosts reload it to start a fresh game.
+        target_compile_options(common PRIVATE -fno-gnu-unique)
+        target_compile_options(commonr PRIVATE -fno-gnu-unique)
+    endif()
 endif()
 
 # These options currently require directx components from the aug 2007 SDK.
