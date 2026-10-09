@@ -2,9 +2,16 @@
 
     python ppo.py --run-dir runs/first [--envs 12] [--total-steps 2000000] [--device mps]
     python ppo.py --benchmark [--total-steps 98304] [--envs 12] [--run-dir DIR]
+    python ppo.py --run-dir runs/curriculum --curriculum [--init-from runs/first/latest.pt]
 
 Follows the single-file CleanRL style. Writes metrics.csv and checkpoints (latest.pt and
 every --save-every updates) to the run directory; evaluate.py plays a checkpoint.
+
+--ai-difficulty fixes the built-in AI's difficulty; --curriculum instead starts against the
+easy AI and moves up a level once the win rate there reaches --curriculum-threshold over
+the last --curriculum-window games at that level, keeping --curriculum-floor of games on
+the easier levels (see curriculum.py). Each env's next game is assigned as its current one
+starts. Win rates are logged per difficulty.
 
 --benchmark trains for --total-steps with fixed seeds and no checkpoints, then reports the
 wall time and where it went (game processes, policy inference, PPO updates), with the
@@ -33,7 +40,10 @@ import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 from tdgym.env import GRID, PLANES  # noqa: E402
+from tdgym.env import AI_DIFFICULTIES, ai_difficulty_level  # noqa: E402
 from tdgym.macro import ACTIONS, FEATURES, make_macro_env  # noqa: E402
+
+from curriculum import Curriculum  # noqa: E402
 
 
 def parse_args():
@@ -54,11 +64,16 @@ def parse_args():
     p.add_argument("--device", default="auto", help="auto, mps, cuda or cpu")
     p.add_argument("--seed", type=int, default=1)
     p.add_argument("--map", type=int, default=1)
-    p.add_argument("--ai-difficulty", default="normal", choices=["easy", "normal", "hard"])
+    p.add_argument("--ai-difficulty", default="normal", choices=AI_DIFFICULTIES)
+    p.add_argument("--curriculum", action="store_true", help="adapt the AI difficulty, see above")
+    p.add_argument("--curriculum-threshold", type=float, default=0.5)
+    p.add_argument("--curriculum-window", type=int, default=100)
+    p.add_argument("--curriculum-floor", type=float, default=0.2)
     p.add_argument("--max-minutes", type=float, default=30)
     p.add_argument("--decision-frames", type=int, default=30)
     p.add_argument("--save-every", type=int, default=50, help="updates between numbered checkpoints")
-    p.add_argument("--resume", help="checkpoint to continue from")
+    p.add_argument("--resume", help="checkpoint to continue from: weights, optimizer, counters, curriculum")
+    p.add_argument("--init-from", help="checkpoint to take the starting weights from, for a new run")
     p.add_argument("--benchmark", action="store_true", help="time a fixed amount of training, see above")
     args = p.parse_args()
     if not args.run_dir and not args.benchmark:
@@ -119,11 +134,20 @@ def main():
     net = Policy(**shape).to(device)
     optimizer = torch.optim.Adam(net.parameters(), lr=args.lr, eps=1e-5)
     global_step = update = 0
+    if args.curriculum:
+        curriculum = Curriculum(args.curriculum_threshold, args.curriculum_window, args.curriculum_floor, seed=args.seed)
+    else:
+        # A fixed difficulty: a curriculum that never moves, for the per-difficulty statistics.
+        curriculum = Curriculum(float("inf"), 100, 0.0, level=ai_difficulty_level(args.ai_difficulty))
     if args.resume:
         checkpoint = torch.load(args.resume, map_location=device, weights_only=False)
         net.load_state_dict(checkpoint["model"])
         optimizer.load_state_dict(checkpoint["optimizer"])
         global_step, update = checkpoint["global_step"], checkpoint["update"]
+        if args.curriculum and "curriculum" in checkpoint:
+            curriculum.load(checkpoint["curriculum"])
+    elif args.init_from:
+        net.load_state_dict(torch.load(args.init_from, map_location=device, weights_only=False)["model"])
 
     n, t = args.envs, args.steps
     maps = torch.zeros((t, n, len(PLANES), GRID, GRID), dtype=torch.uint8, device=device)
@@ -143,10 +167,17 @@ def main():
     if new_file:
         metrics.writerow(
             ["update", "global_step", "sps", "episodes", "win_rate", "loss_rate", "timeout_rate", "return", "minutes",
-             "harvested", "kills", "losses", "policy_loss", "value_loss", "entropy", "approx_kl"]
+             "harvested", "kills", "losses", "policy_loss", "value_loss", "entropy", "approx_kl",
+             "level", "win_easy", "win_normal", "win_hard"]
         )
 
+    # The difficulty each env's next game is played at.
+    next_difficulty = [curriculum.sample() if args.curriculum else curriculum.level for _ in range(n)]
+    envs.set_attr("ai_difficulty", next_difficulty)
     obs, _ = envs.reset(seed=args.seed + 1000 * update)
+    if args.curriculum:
+        next_difficulty = [curriculum.sample() for _ in range(n)]
+        envs.set_attr("ai_difficulty", next_difficulty)
     next_done = torch.zeros(n, device=device)
     start = time.time()
     setup_s = start - t_main
@@ -197,8 +228,15 @@ def main():
                 for i in np.nonzero(done)[0]:
                     final = env_item(info["final_info"], i)
                     scalars = final["scalars"]
+                    difficulty = int(final["ai_difficulty"])
+                    if curriculum.record(difficulty, final["won"]):
+                        print("curriculum: moving up to the %s AI" % AI_DIFFICULTIES[curriculum.level], flush=True)
+                    if args.curriculum:
+                        # The game just started in env i was assigned before; pick the one after it.
+                        next_difficulty[i] = curriculum.sample()
                     recent.append(
                         {
+                            "ai_difficulty": difficulty,
                             "won": bool(final["won"]),
                             "lost": bool(final["lost"]),
                             "timed_out": bool(final["timed_out"]),
@@ -209,6 +247,8 @@ def main():
                         }
                     )
             episode_returns_add(recent, done, rewards[step])
+            if args.curriculum and done.any():
+                envs.set_attr("ai_difficulty", next_difficulty)
             timing["bookkeeping"] += time.time() - t2
 
         t_update = time.time()
@@ -266,13 +306,15 @@ def main():
             float(np.mean(returns_recent)) if returns_recent else float("nan"), mean("minutes"),
             mean("harvested"), mean("kills"), mean("losses"), policy_loss.item(), value_loss.item(),
             entropy.item(), approx_kl.item(),
+            AI_DIFFICULTIES[curriculum.level], *(curriculum.win_rate(d) for d in range(len(AI_DIFFICULTIES))),
         ]
         metrics.writerow(row)
         metrics_file.flush()
         print(
             "update %4d  step %8d  %5d sps  episodes %3d  win %.2f  loss %.2f  timeout %.2f  return %6.2f  "
-            "minutes %4.1f  harvested %6.0f  kills %4.1f  losses %4.1f  entropy %.2f"
-            % tuple(row[:12] + [row[14]]),
+            "minutes %4.1f  harvested %6.0f  kills %4.1f  losses %4.1f  entropy %.2f  "
+            "AI %s  win e/n/h %.2f/%.2f/%.2f"
+            % tuple(row[:12] + [row[14]] + row[16:]),
             flush=True,
         )
 
@@ -280,6 +322,7 @@ def main():
             checkpoint = {
                 "model": net.state_dict(), "optimizer": optimizer.state_dict(), "shape": shape,
                 "args": vars(args), "update": update, "global_step": global_step,
+                "curriculum": curriculum.state(),
             }
             torch.save(checkpoint, os.path.join(args.run_dir, "latest.pt"))
             if update % args.save_every == 0:

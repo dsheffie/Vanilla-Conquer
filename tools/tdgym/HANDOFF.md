@@ -128,6 +128,15 @@ plays exactly as before; the scripted baseline averages -10.75 / -11.30 / -11.76
 against easy / normal / hard over 6 games each. Remaster builds have no difficulty rules
 of their own, so tdhost passes the vanilla game's easy and hard values through `CNC_Config`.
 
+**Curriculum:** `--curriculum` starts against the easy AI and moves up a level once the
+win rate at the current level reaches `--curriculum-threshold` (default 0.5) over its last
+`--curriculum-window` games (default 100). `--curriculum-floor` (default 0.2) of games stay
+on the easier levels, split evenly, so the policy keeps what it learned there. Each env's
+next game is assigned when its current game starts, so a level change reaches each env one
+game later. The log and `metrics.csv` show the current level and win rates per difficulty;
+`--resume` continues the curriculum, and `--init-from CHECKPOINT` starts a new run from
+another run's weights, e.g. to carry a policy trained against normal into a curriculum.
+
 `--device auto` picks CUDA, then MPS, then CPU. `--envs` is one game per process; use
 about one per core and leave a few cores for the learner. Resume with `--resume runs/NAME/latest.pt`.
 Progress is in `runs/NAME/metrics.csv` (one row per update); watch `win_rate`,

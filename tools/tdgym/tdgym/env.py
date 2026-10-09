@@ -168,7 +168,8 @@ class TiberianDawnEnv(gym.Env):
         )
         self.map_number = map_number
         self.num_ais = num_ais
-        self.ai_difficulty = ai_difficulty_level(ai_difficulty)
+        self.ai_difficulty = ai_difficulty
+        self._episode_ai_difficulty = self.ai_difficulty
         self.agent_side = agent_side
         self.credits = credits
         self.frame_skip = frame_skip
@@ -193,9 +194,21 @@ class TiberianDawnEnv(gym.Env):
 
     # Gymnasium interface.
 
+    @property
+    def ai_difficulty(self):
+        """0 easy, 1 normal, 2 hard; set a level or name to apply from the next reset."""
+        return self._ai_difficulty
+
+    @ai_difficulty.setter
+    def ai_difficulty(self, value):
+        self._ai_difficulty = ai_difficulty_level(value)
+
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed)
+        if options and "ai_difficulty" in options:
+            self.ai_difficulty = options["ai_difficulty"]
         game_seed = int(self.np_random.integers(1, 2**31))
+        self._episode_ai_difficulty = self.ai_difficulty
         self._native.reset(
             self.map_number, self.num_ais, game_seed, self.agent_side, self.credits, self.ai_difficulty
         )
@@ -338,7 +351,12 @@ class TiberianDawnEnv(gym.Env):
         return {"kind": kind, "build": build, "place": place, "cancel": cancel}
 
     def _info(self, **extra):
-        info = {"status": self._status, "scalars": dict(self._scalars), "action_mask": self._action_mask()}
+        info = {
+            "status": self._status,
+            "scalars": dict(self._scalars),
+            "action_mask": self._action_mask(),
+            "ai_difficulty": self._episode_ai_difficulty,
+        }
         info.update(extra)
         return info
 

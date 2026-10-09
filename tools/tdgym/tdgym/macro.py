@@ -128,6 +128,15 @@ class MacroEnv(gym.Wrapper):
         )
         self.action_space = spaces.Discrete(len(ACTIONS))
 
+    @property
+    def ai_difficulty(self):
+        """The base env's AI difficulty, settable here so vector envs' set_attr reaches it."""
+        return self.base.ai_difficulty
+
+    @ai_difficulty.setter
+    def ai_difficulty(self, value):
+        self.base.ai_difficulty = value
+
     def reset(self, **kwargs):
         obs, info = self.env.reset(**kwargs)
         self._explored_fraction = self._explored_now()
