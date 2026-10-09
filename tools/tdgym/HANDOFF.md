@@ -99,6 +99,11 @@ export TDGYM_DATA=/path/to/data
 export PYTHONPATH=$PWD/tools/tdgym
 ```
 
+The default Linux torch wheel targets the newest CUDA and needs a recent driver; check
+`nvidia-smi` and pick a matching build if it is older. For example zen5's driver 550
+supports CUDA 12.4, so: `pip install torch --index-url https://download.pytorch.org/whl/cu126`
+(CUDA 12.x builds run on any 12.x-era driver).
+
 ### 4. Check it works
 
 ```sh
@@ -137,15 +142,26 @@ the games (`env_step`), choosing actions (`inference`), PPO updates (`update`) a
 bookkeeping, plus peak memory. Keep `--total-steps` fixed and vary `--envs`/`--device` to
 find the best configuration; the `share` fields show which part to scale.
 
-Reference, Apple M6 (12 cores, 16 GB), MPS, 12 envs:
+Reference results, `--total-steps 98304`:
 
-| Wall | Decisions/s | Game frames/s | env_step | inference | update | Peak memory |
-|---|---|---|---|---|---|---|
-| 128.5 s (+1.7 s setup) | 765 | 22,953 | 28.5% | 14.5% | 52.3% (1.05 s each) | trainer 513 MB, env 141 MB |
+| Machine | Device | Envs | Wall | Decisions/s | env_step | inference | update | Memory |
+|---|---|---|---|---|---|---|---|---|
+| Apple M6, 12 cores, 16 GB | MPS | 12 | 128.5 s | 765 | 28.5% | 14.5% | 52.3% (1.05 s each) | trainer 513 MB, env 141 MB |
+| zen5: Ryzen 9 9900X, 12C/24T, 60 GB | RTX 4060 Ti 8 GB | 12 | 67.8 s | 1,450 | 51.8% | 11.1% | 35.7% (378 ms each) | trainer 1.6 GB, env 143 MB |
+| zen5 | RTX 4060 Ti 8 GB | 20 | 63.9 s | 1,563 | 50.0% | 9.7% | 39.0% (639 ms each) | |
 
-Here the learner is the bottleneck, not the games: a faster GPU helps most, and running
-PPO updates while the games play the next rollout (they currently alternate) would
-hide most of the update time.
+(zen5 runs had another job using about 4 of its 24 threads.)
+
+On the M6 the PPO update is the bottleneck; on zen5 the GPU is 2.8x faster at it and
+waiting on the games becomes half the time. Going from 12 to 20 games there gains only 7%:
+envs step in lockstep, so each step waits for the slowest game, and extra games share
+cores with SMT siblings. The next speedup is structural rather than more envs: run PPO
+updates while the games play the next rollout (they currently alternate), and step games
+asynchronously.
+
+On Linux the env processes are forked from the trainer, so the kernel's peak-RSS for
+children counts pages shared with it; the benchmark reports env memory as proportional
+set size from `/proc/PID/smaps_rollup` instead.
 
 ## Memory sizing
 
@@ -157,6 +173,11 @@ The first run was killed for low memory on a 16 GB Mac. Two causes were found an
   runs the same cleanup on unload as Windows' `DllMain` does. A drift of under 1 MB per
   episode remains, which only matters over thousands of episodes per process.
 - **torch in game processes:** see below.
+
+Two related Linux problems were also fixed: GCC marked `MixFileClass::MixList` as a GNU
+unique symbol, which made `dlclose` a no-op so "reloads" restarted the game in place
+(built with `-fno-gnu-unique` now), and freeing the game from a destructor double-freed it
+at exit (tdhost calls the new `CNC_Free_Game` before `dlclose` instead).
 
 Measured with both fixes:
 
@@ -235,5 +256,7 @@ harvested credit makes 45k credits worth about +9, against +1 for a win, so turt
 - **AI-only games** used to end on frame 2 ("no humans left"); fixed in `MPlayer_Defeated`.
 - **`char` signedness**: object owners are plain `char`, signed on macOS and unsigned on
   aarch64 Linux; always read them as unsigned.
+- **`dlclose` may not unload**: check `/proc/self/maps` after it if reloads misbehave;
+  any GNU unique symbol (`nm -D --defined-only lib.so | grep " u "`) pins a library in memory.
 - **`pkill -f`** on a pattern that appears in your own shell command kills that shell; use
   `pkill -x vanillatd` or exact pids.
