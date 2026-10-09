@@ -1,9 +1,14 @@
 """PPO with action masking for MacroEnv, one game per subprocess.
 
     python ppo.py --run-dir runs/first [--envs 12] [--total-steps 2000000] [--device mps]
+    python ppo.py --benchmark [--total-steps 98304] [--envs 12] [--run-dir DIR]
 
 Follows the single-file CleanRL style. Writes metrics.csv and checkpoints (latest.pt and
 every --save-every updates) to the run directory; evaluate.py plays a checkpoint.
+
+--benchmark trains for --total-steps with fixed seeds and no checkpoints, then reports the
+wall time and where it went (game processes, policy inference, PPO updates), with the
+machine and settings, to stdout and run-dir/benchmark.json if --run-dir is given.
 Needs $TDGYM_GAME_LIB, $TDGYM_DATA and $TDGYM_TDENV.
 
 torch is only imported inside functions: on macOS the game subprocesses start with
@@ -14,8 +19,13 @@ one of them (about 280 MB each).
 import argparse
 import collections
 import csv
+import json
 import os
+import platform
+import resource
+import subprocess
 import sys
+import tempfile
 import time
 
 import gymnasium as gym
@@ -28,7 +38,7 @@ from tdgym.macro import ACTIONS, FEATURES, make_macro_env  # noqa: E402
 
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    p.add_argument("--run-dir", required=True)
+    p.add_argument("--run-dir", help="where metrics and checkpoints go; required unless --benchmark")
     p.add_argument("--envs", type=int, default=12)
     p.add_argument("--steps", type=int, default=128, help="rollout length per env")
     p.add_argument("--total-steps", type=int, default=2_000_000)
@@ -48,7 +58,11 @@ def parse_args():
     p.add_argument("--decision-frames", type=int, default=30)
     p.add_argument("--save-every", type=int, default=50, help="updates between numbered checkpoints")
     p.add_argument("--resume", help="checkpoint to continue from")
-    return p.parse_args()
+    p.add_argument("--benchmark", action="store_true", help="time a fixed amount of training, see above")
+    args = p.parse_args()
+    if not args.run_dir and not args.benchmark:
+        p.error("--run-dir is required unless --benchmark")
+    return args
 
 
 def make_env(args):
@@ -82,7 +96,11 @@ def main():
     import torch
     from policy import Policy
 
+    t_main = time.time()
     args = parse_args()
+    benchmark_dir = args.run_dir
+    if args.benchmark and not args.run_dir:
+        args.run_dir = tempfile.mkdtemp(prefix="tdgym-benchmark-")
     if args.device == "auto":
         args.device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
     os.makedirs(args.run_dir, exist_ok=True)
@@ -127,14 +145,23 @@ def main():
     obs, _ = envs.reset(seed=args.seed + 1000 * update)
     next_done = torch.zeros(n, device=device)
     start = time.time()
+    setup_s = start - t_main
     start_step = global_step
     batch = n * t
     minibatch = batch // args.minibatches
+    timing = collections.Counter()  # Seconds spent in each phase.
+
+    def sync():
+        if args.benchmark and device.type == "cuda":
+            torch.cuda.synchronize()
+        elif args.benchmark and device.type == "mps":
+            torch.mps.synchronize()
 
     while global_step < args.total_steps:
         update += 1
         net.eval()
         for step in range(t):
+            t0 = time.time()
             m, f, k = to_tensors(obs, device)
             maps[step], features[step], masks[step], dones[step] = m, f, k, next_done
             with torch.no_grad():
@@ -142,8 +169,13 @@ def main():
                 dist = torch.distributions.Categorical(logits=logits)
                 action = dist.sample()
             actions[step], logprobs[step], values[step] = action, dist.log_prob(action), value
+            action_np = action.cpu().numpy()  # Waits for the device.
+            t1 = time.time()
 
-            obs, reward, terminated, truncated, info = envs.step(action.cpu().numpy())
+            obs, reward, terminated, truncated, info = envs.step(action_np)
+            t2 = time.time()
+            timing["inference"] += t1 - t0
+            timing["env_step"] += t2 - t1
             reward = np.asarray(reward, dtype=np.float32)
             # Episodes cut off by the time limit continue in principle: bootstrap from the
             # value of their final observation.
@@ -173,7 +205,9 @@ def main():
                         }
                     )
             episode_returns_add(recent, done, rewards[step])
+            timing["bookkeeping"] += time.time() - t2
 
+        t_update = time.time()
         # Generalised advantage estimation.
         with torch.no_grad():
             next_value = net(*to_tensors(obs, device))[1]
@@ -214,6 +248,9 @@ def main():
                 optimizer.step()
                 with torch.no_grad():
                     approx_kl = ((ratio - 1) - log_ratio).mean()
+        sync()
+        timing["update"] += time.time() - t_update
+        t_log = time.time()
 
         sps = (global_step - start_step) / (time.time() - start)
         episodes = [e for e in recent if "won" in e]
@@ -235,15 +272,88 @@ def main():
             flush=True,
         )
 
-        checkpoint = {
-            "model": net.state_dict(), "optimizer": optimizer.state_dict(), "shape": shape,
-            "args": vars(args), "update": update, "global_step": global_step,
-        }
-        torch.save(checkpoint, os.path.join(args.run_dir, "latest.pt"))
-        if update % args.save_every == 0:
-            torch.save(checkpoint, os.path.join(args.run_dir, "update%05d.pt" % update))
+        if not args.benchmark:
+            checkpoint = {
+                "model": net.state_dict(), "optimizer": optimizer.state_dict(), "shape": shape,
+                "args": vars(args), "update": update, "global_step": global_step,
+            }
+            torch.save(checkpoint, os.path.join(args.run_dir, "latest.pt"))
+            if update % args.save_every == 0:
+                torch.save(checkpoint, os.path.join(args.run_dir, "update%05d.pt" % update))
+        timing["logging"] += time.time() - t_log
 
+    wall_s = time.time() - start
     envs.close()
+    if args.benchmark:
+        report_benchmark(args, benchmark_dir, device, wall_s, setup_s, global_step - start_step, update, timing)
+
+
+def machine_info(device):
+    import torch
+
+    info = {
+        "platform": platform.platform(),
+        "machine": platform.machine(),
+        "cpus": os.cpu_count(),
+        "python": platform.python_version(),
+        "torch": torch.__version__,
+    }
+    try:
+        if sys.platform == "darwin":
+            sysctl = lambda key: subprocess.run(["sysctl", "-n", key], capture_output=True, text=True).stdout.strip()  # noqa: E731
+            info["cpu"] = sysctl("machdep.cpu.brand_string")
+            info["memory_gb"] = round(int(sysctl("hw.memsize")) / 2**30, 1)
+        else:
+            with open("/proc/cpuinfo") as f:
+                names = [line.split(":", 1)[1].strip() for line in f if line.lower().startswith("model name")]
+            info["cpu"] = names[0] if names else platform.processor()
+            with open("/proc/meminfo") as f:
+                info["memory_gb"] = round(int(f.readline().split()[1]) / 2**20, 1)
+    except (OSError, ValueError, IndexError):
+        pass
+    if device.type == "cuda":
+        info["gpu"] = torch.cuda.get_device_name(device)
+    elif device.type == "mps":
+        info["gpu"] = "Apple GPU (MPS)"
+    return info
+
+
+def report_benchmark(args, out_dir, device, wall_s, setup_s, decisions, updates, timing):
+    # ru_maxrss is bytes on macOS and kilobytes on Linux.
+    scale = 1 if sys.platform == "darwin" else 1024
+    peak = lambda who: round(resource.getrusage(who).ru_maxrss * scale / 2**20)  # noqa: E731
+    result = {
+        "machine": machine_info(device),
+        "settings": {
+            "device": str(device), "envs": args.envs, "steps": args.steps, "total_steps": args.total_steps,
+            "decision_frames": args.decision_frames, "epochs": args.epochs, "minibatches": args.minibatches,
+            "map": args.map, "seed": args.seed,
+        },
+        "results": {
+            "wall_s": round(wall_s, 1),
+            "setup_s": round(setup_s, 1),
+            "decisions": decisions,
+            "updates": updates,
+            "decisions_per_s": round(decisions / wall_s),
+            "game_frames_per_s": round(decisions * args.decision_frames / wall_s),
+            "seconds": {k: round(v, 1) for k, v in timing.items()},
+            "share": {k: round(v / wall_s, 3) for k, v in timing.items()},
+            "update_ms": round(1000 * timing["update"] / max(updates, 1)),
+            "peak_rss_mb": {"trainer": peak(resource.RUSAGE_SELF), "largest_env_process": peak(resource.RUSAGE_CHILDREN)},
+        },
+    }
+    r = result["results"]
+    print("\nbenchmark: %d decisions in %.1f s (+%.1f s setup) on %s, %d envs"
+          % (decisions, wall_s, setup_s, device, args.envs))
+    print("  %d decisions/s, %d game frames/s, %d ms per PPO update"
+          % (r["decisions_per_s"], r["game_frames_per_s"], r["update_ms"]))
+    for phase in ("env_step", "inference", "update", "bookkeeping", "logging"):
+        print("  %-12s %6.1f s  %5.1f%%" % (phase, timing[phase], 100 * timing[phase] / wall_s))
+    print("  peak memory: trainer %d MB, largest env process %d MB" % tuple(r["peak_rss_mb"].values()))
+    if out_dir:
+        with open(os.path.join(out_dir, "benchmark.json"), "w") as f:
+            json.dump(result, f, indent=2)
+        print("  wrote", os.path.join(out_dir, "benchmark.json"))
 
 
 # Running episode returns, kept per env between rollouts.

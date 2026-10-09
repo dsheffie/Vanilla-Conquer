@@ -122,16 +122,50 @@ Progress is in `runs/NAME/metrics.csv` (one row per update); watch `win_rate`,
 `loss_rate`, `minutes`, `kills` and `losses`. Evaluate a checkpoint with
 `evaluate.py --policy runs/NAME/latest.pt --episodes 20`.
 
+### 6. Benchmark
+
+Time a fixed amount of training, the same everywhere, to compare machines and settings:
+
+```sh
+venv/bin/python tools/tdgym/train/ppo.py --benchmark --total-steps 98304 --envs 12 --run-dir runs/bench-HOST
+```
+
+98,304 decisions is 64 PPO updates at the default 12 envs x 128 steps. It trains with
+fixed seeds and writes no checkpoints, then prints and saves `benchmark.json`: machine,
+settings, wall time, decisions/s, game frames/s, and the time split between waiting on
+the games (`env_step`), choosing actions (`inference`), PPO updates (`update`) and
+bookkeeping, plus peak memory. Keep `--total-steps` fixed and vary `--envs`/`--device` to
+find the best configuration; the `share` fields show which part to scale.
+
+Reference, Apple M6 (12 cores, 16 GB), MPS, 12 envs:
+
+| Wall | Decisions/s | Game frames/s | env_step | inference | update | Peak memory |
+|---|---|---|---|---|---|---|
+| 128.5 s (+1.7 s setup) | 765 | 22,953 | 28.5% | 14.5% | 52.3% (1.05 s each) | trainer 513 MB, env 141 MB |
+
+Here the learner is the bottleneck, not the games: a faster GPU helps most, and running
+PPO updates while the games play the next rollout (they currently alternate) would
+hide most of the update time.
+
 ## Memory sizing
 
-The first run was killed for low memory on a 16 GB Mac. Measured afterwards:
+The first run was killed for low memory on a 16 GB Mac. Two causes were found and fixed:
 
-- Each game process: about 120 MB.
+- **Reload leak (the big one):** each reset reloads the game library, and on non-Windows
+  platforms nothing freed the game's allocations on unload, so every game process grew
+  ~42 MB per episode; the first run's processes played ~90 episodes each. The dll now
+  runs the same cleanup on unload as Windows' `DllMain` does. A drift of under 1 MB per
+  episode remains, which only matters over thousands of episodes per process.
+- **torch in game processes:** see below.
+
+Measured with both fixes:
+
+- Each game process: about 120-140 MB.
 - Trainer process: about 0.5 GB, plus GPU memory for the 1.2M parameter network.
 - Rollout buffer, kept on the device: `steps x envs x (12*64*64 bytes + 2.4 KB)`, about
   75 MB at 128 x 12 and 400 MB at 128 x 64.
 
-One fix is already in: the game processes used to import torch (about 280 MB each)
+The game processes also used to import torch (about 280 MB each)
 because macOS starts them with `spawn`, which re-imports `ppo.py`. Keep torch imports
 inside functions in `ppo.py` and out of anything the env processes import.
 
@@ -144,7 +178,8 @@ env before touching CUDA, which keeps that safe; keep it that way, or pass
 - Simulation alone: ~8,000-13,000 frames/s per game; 12 parallel AI-only games give
   ~5,400 complete games per hour (`scale.sh`).
 - `TiberianDawnEnv`: ~1,700 steps/s per process (15 frames per step).
-- `MacroEnv` + PPO, 12 envs, MPS: ~650-850 decisions/s, about 3,000 thirty-minute games per hour.
+- `MacroEnv` + PPO, 12 envs, MPS: ~750-850 decisions/s, about 3,000 thirty-minute games per hour
+  (see Benchmark above).
 - Learner: on Apple silicon, torch CPU matmuls run on the SME unit through Accelerate
   (1.5 TFLOP/s single thread) but convolutions run NEON kernels; the policy uses no
   convolutions for that reason. MPS was still about 2x faster than CPU for training.

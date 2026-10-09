@@ -114,6 +114,21 @@ BOOL WINAPI DllMain(HINSTANCE instance, unsigned int fdwReason, void* lpvReserve
 }
 #endif
 
+#if defined REMASTER_BUILD && !defined _WIN32
+/*
+** The counterpart of DLL_PROCESS_DETACH above: free the game's allocations when the
+** library is unloaded, so a host that reloads it doesn't leak them.
+*/
+__attribute__((destructor)) static void DLL_Unload()
+{
+    DLL_Shutdown();
+
+    MFCD::Free_All();
+
+    Uninit_Game();
+}
+#endif
+
 #ifdef REMASTER_BUILD
 int main(int, char*[]);
 
