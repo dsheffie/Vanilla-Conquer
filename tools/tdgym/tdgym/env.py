@@ -103,6 +103,10 @@ class TiberianDawnEnv(gym.Env):
     info["action_mask"] which kinds and items are currently possible. placement_mask(item)
     gives the cells where a completed building can go.
 
+    Rendering: render_mode="rgb_array" draws the real game screen, as the agent sees it, and
+    render() returns it; on_frame(rgb) with frame_every N also captures every Nth game frame
+    inside a step, for video. Drawing slows the simulation, so leave it off for training.
+
     Reward: +1 for winning, -1 for losing, unless reward_fn(previous_scalars, scalars,
     status) is given. Episodes are truncated after max_frames game frames.
 
@@ -110,7 +114,7 @@ class TiberianDawnEnv(gym.Env):
     environments use gymnasium.vector.AsyncVectorEnv.
     """
 
-    metadata = {"render_modes": ["ansi"]}
+    metadata = {"render_modes": ["ansi", "rgb_array"], "render_fps": 15}
 
     def __init__(
         self,
@@ -128,6 +132,8 @@ class TiberianDawnEnv(gym.Env):
         group_radius=4,
         reward_fn=None,
         render_mode=None,
+        on_frame=None,
+        frame_every=1,
     ):
         if work_dir is None:
             # Ours to delete: at close, or at exit if close is never called. Deleting the
@@ -152,6 +158,10 @@ class TiberianDawnEnv(gym.Env):
         self.group_radius = group_radius
         self.reward_fn = reward_fn
         self.render_mode = render_mode
+        self.on_frame = on_frame
+        self.frame_every = frame_every
+        if render_mode == "rgb_array":
+            self._native.set_rendering(True)
         self._warned = set()
 
         self.observation_space = spaces.Dict(
@@ -176,7 +186,17 @@ class TiberianDawnEnv(gym.Env):
     def step(self, action):
         previous = self._scalars
         valid = self._apply(np.asarray(action, dtype=np.int64))
-        self._status = self._native.step(self.frame_skip)
+        if self.on_frame is not None and self.render_mode == "rgb_array":
+            # Step in chunks so the video sees every frame_every-th frame, not just one per step.
+            remaining = self.frame_skip
+            self._status = _native.RUNNING
+            while remaining > 0 and self._status == _native.RUNNING:
+                chunk = min(self.frame_every, remaining)
+                self._status = self._native.step(chunk)
+                remaining -= chunk
+                self.on_frame(self._native.frame())
+        else:
+            self._status = self._native.step(self.frame_skip)
         self._capture()
         if self.reward_fn is not None:
             reward = float(self.reward_fn(previous, self._scalars, self._status))
@@ -187,6 +207,8 @@ class TiberianDawnEnv(gym.Env):
         return self._observation(), reward, terminated, truncated, self._info(action_valid=valid)
 
     def render(self):
+        if self.render_mode == "rgb_array":
+            return self._native.frame()
         if self.render_mode != "ansi":
             return None
         chars = np.full((self._native.height, self._native.width), " ", dtype="<U1")

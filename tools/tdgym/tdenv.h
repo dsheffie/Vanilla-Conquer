@@ -110,6 +110,17 @@ int tdenv_reset(int map, int num_ais, unsigned seed, int agent_side, int credits
 /* Size of the playable grid. */
 int tdenv_grid_size(int* width, int* height);
 
+/*
+** Draw the game screen every frame, so tdenv_frame can capture it. Off by default: drawing
+** slows the simulation down. Applies from the next reset, or immediately in a game.
+*/
+int tdenv_set_rendering(int enabled);
+/*
+** The current frame as RGB, 3 bytes per pixel in row order, as the agent sees it (its own
+** shroud). Writes at most max_bytes and sets the size; the whole map at 24 pixels a cell.
+*/
+int tdenv_frame(unsigned char* rgb, int max_bytes, int* width, int* height);
+
 /* Advance the game by 'frames' frames, stopping early if the game ends. */
 int tdenv_step(int frames);
 

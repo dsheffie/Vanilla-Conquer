@@ -92,6 +92,8 @@ public:
     void(__cdecl* Set_Random_Seed)(unsigned int) = nullptr;
     void(__cdecl* Set_Headless)(bool) = nullptr;
     void(__cdecl* Free_Game)(void) = nullptr;
+    bool(__cdecl* Get_Visible_Page)(unsigned char*, unsigned int&, unsigned int&) = nullptr;
+    bool(__cdecl* Get_Palette)(unsigned char (&)[256][3]) = nullptr;
     void(__cdecl* Handle_Input)(InputRequestEnum, unsigned char, uint64_t, int, int, int, int) = nullptr;
     void(__cdecl* Handle_Sidebar_Request)(SidebarRequestEnum, uint64_t, int, int, short, short) = nullptr;
     void(__cdecl* Handle_Structure_Request)(StructureRequestEnum, uint64_t, int) = nullptr;

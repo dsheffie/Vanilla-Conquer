@@ -29,6 +29,8 @@ std::string DataDir;
 tdhost::GameLib& Game = *new tdhost::GameLib;
 bool Started = false;
 bool GameOver = false;
+bool Rendering = false;
+std::vector<unsigned char> Page;
 int Frame = 0;
 
 // Playable grid, in absolute map cells.
@@ -364,6 +366,7 @@ int tdenv_reset(int map, int num_ais, unsigned seed, int agent_side, int credits
     if (!Game.Load(LibCopy, Event_Callback, Error)) {
         return TDENV_ERROR;
     }
+    Game.Set_Headless(!Rendering);
     tdhost::SkirmishSettings settings;
     settings.Map = map;
     settings.Credits = credits;
@@ -403,6 +406,42 @@ int tdenv_grid_size(int* width, int* height)
     }
     *width = GridW;
     *height = GridH;
+    return 0;
+}
+
+int tdenv_set_rendering(int enabled)
+{
+    Rendering = enabled != 0;
+    if (Game.Is_Loaded()) {
+        Game.Set_Headless(!Rendering);
+    }
+    return 0;
+}
+
+int tdenv_frame(unsigned char* rgb, int max_bytes, int* width, int* height)
+{
+    if (!Started || !Rendering) {
+        return Fail("tdenv_frame needs a game in progress with rendering on");
+    }
+    unsigned w = 0, h = 0;
+    Page.resize(GridW * GridH * CELL_PIXELS * CELL_PIXELS);
+    if (!Game.Get_Visible_Page(Page.data(), w, h) || (size_t)w * h > Page.size()) {
+        return Fail("no frame available");
+    }
+    if ((int)(w * h * 3) > max_bytes) {
+        return Fail("frame buffer too small");
+    }
+    unsigned char palette[256][3];
+    Game.Get_Palette(palette);
+    // The palette is 6 bits per channel, as on VGA.
+    for (unsigned i = 0; i < w * h; ++i) {
+        const unsigned char* c = palette[Page[i]];
+        rgb[3 * i] = (unsigned char)(c[0] << 2 | c[0] >> 4);
+        rgb[3 * i + 1] = (unsigned char)(c[1] << 2 | c[1] >> 4);
+        rgb[3 * i + 2] = (unsigned char)(c[2] << 2 | c[2] >> 4);
+    }
+    *width = (int)w;
+    *height = (int)h;
     return 0;
 }
 

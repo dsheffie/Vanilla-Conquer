@@ -178,6 +178,8 @@ bool GameLib::Load(const std::string& path, EventCallback callback, std::string&
               && Lookup(Handle, "CNC_Set_Random_Seed", Set_Random_Seed, error)
               && Lookup(Handle, "CNC_Set_Headless", Set_Headless, error)
               && Lookup(Handle, "CNC_Free_Game", Free_Game, error)
+              && Lookup(Handle, "CNC_Get_Visible_Page", Get_Visible_Page, error)
+              && Lookup(Handle, "CNC_Get_Palette", Get_Palette, error)
               && Lookup(Handle, "CNC_Handle_Input", Handle_Input, error)
               && Lookup(Handle, "CNC_Handle_Sidebar_Request", Handle_Sidebar_Request, error)
               && Lookup(Handle, "CNC_Handle_Structure_Request", Handle_Structure_Request, error)

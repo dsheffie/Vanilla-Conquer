@@ -140,6 +140,8 @@ class Native:
             "tdenv_open": ([c_str, c_str, c_str, c_str], c_int),
             "tdenv_reset": ([c_int, c_int, c_uint, c_int, c_int], c_int),
             "tdenv_grid_size": ([int_p, int_p], c_int),
+            "tdenv_set_rendering": ([c_int], c_int),
+            "tdenv_frame": ([byte_p, c_int, int_p, int_p], c_int),
             "tdenv_step": ([c_int], c_int),
             "tdenv_observe": ([], c_int),
             "tdenv_scalars": ([ctypes.POINTER(TDScalars)], c_int),
@@ -194,6 +196,20 @@ class Native:
         out = np.zeros((self.height, self.width), dtype=np.uint8)
         func(out.ctypes.data_as(ctypes.POINTER(ctypes.c_ubyte)))
         return out
+
+    def set_rendering(self, enabled):
+        self._check(self._lib.tdenv_set_rendering(int(enabled)))
+
+    def frame(self):
+        """The game screen as an (height, width, 3) uint8 RGB array; needs set_rendering(True)."""
+        out = np.empty(self.height * self.width * 24 * 24 * 3, dtype=np.uint8)
+        w, h = ctypes.c_int(), ctypes.c_int()
+        self._check(
+            self._lib.tdenv_frame(
+                out.ctypes.data_as(ctypes.POINTER(ctypes.c_ubyte)), out.size, ctypes.byref(w), ctypes.byref(h)
+            )
+        )
+        return out[: w.value * h.value * 3].reshape(h.value, w.value, 3)
 
     def shroud(self):
         """1 where the agent has explored, by [y, x]."""
