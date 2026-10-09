@@ -61,6 +61,11 @@ def parse_args():
     p.add_argument("--entropy", type=float, default=0.01)
     p.add_argument("--value-coef", type=float, default=0.5)
     p.add_argument("--max-grad-norm", type=float, default=0.5)
+    p.add_argument("--anneal-lr", action=argparse.BooleanOptionalAction, default=True,
+                   help="decay the learning rate linearly to zero over the run")
+    p.add_argument("--target-kl", type=float, default=0.015,
+                   help="stop an update early once the policy has moved this far (approx KL); 0 disables")
+    p.add_argument("--max-restarts", type=int, default=20, help="game process crashes tolerated per run")
     p.add_argument("--device", default="auto", help="auto, mps, cuda or cpu")
     p.add_argument("--seed", type=int, default=1)
     p.add_argument("--map", type=int, default=1)
@@ -83,6 +88,10 @@ def parse_args():
 
 def make_env(args):
     def thunk():
+        # A crash in the game's native code otherwise kills the process without a trace.
+        import faulthandler
+
+        faulthandler.enable()
         return make_macro_env(
             decision_frames=args.decision_frames,
             max_minutes=args.max_minutes,
@@ -127,9 +136,6 @@ def main():
     torch.set_num_threads(2)
     device = torch.device(args.device)
 
-    envs = gym.vector.AsyncVectorEnv(
-        [make_env(args) for _ in range(args.envs)], autoreset_mode=gym.vector.AutoresetMode.SAME_STEP
-    )
     shape = {"planes": len(PLANES), "grid": GRID, "features": FEATURES, "actions": len(ACTIONS)}
     net = Policy(**shape).to(device)
     optimizer = torch.optim.Adam(net.parameters(), lr=args.lr, eps=1e-5)
@@ -168,17 +174,25 @@ def main():
         metrics.writerow(
             ["update", "global_step", "sps", "episodes", "win_rate", "loss_rate", "timeout_rate", "return", "minutes",
              "harvested", "kills", "losses", "policy_loss", "value_loss", "entropy", "approx_kl",
-             "level", "win_easy", "win_normal", "win_hard"]
+             "level", "win_easy", "win_normal", "win_hard", "lr", "minibatches"]
         )
 
-    # The difficulty each env's next game is played at.
-    next_difficulty = [curriculum.sample() if args.curriculum else curriculum.level for _ in range(n)]
-    envs.set_attr("ai_difficulty", next_difficulty)
-    obs, _ = envs.reset(seed=args.seed + 1000 * update)
-    if args.curriculum:
-        next_difficulty = [curriculum.sample() for _ in range(n)]
-        envs.set_attr("ai_difficulty", next_difficulty)
+    def start_envs(seed):
+        """Start the game processes and their first games; also used after a crash. Returns
+        the envs, their first observations, and the difficulty of each env's next game."""
+        envs = gym.vector.AsyncVectorEnv(
+            [make_env(args) for _ in range(n)], autoreset_mode=gym.vector.AutoresetMode.SAME_STEP
+        )
+        first = [curriculum.sample() if args.curriculum else curriculum.level for _ in range(n)]
+        envs.set_attr("ai_difficulty", first)
+        obs, _ = envs.reset(seed=seed)
+        following = [curriculum.sample() for _ in range(n)] if args.curriculum else first
+        envs.set_attr("ai_difficulty", following)
+        return envs, obs, following
+
+    envs, obs, next_difficulty = start_envs(args.seed + 1000 * update)
     next_done = torch.zeros(n, device=device)
+    restarts = 0
     start = time.time()
     setup_s = start - t_main
     start_step = global_step
@@ -194,62 +208,86 @@ def main():
 
     while global_step < args.total_steps:
         update += 1
+        if args.anneal_lr:
+            lr = args.lr * max(1.0 - global_step / args.total_steps, 0.0)
+            for group in optimizer.param_groups:
+                group["lr"] = lr
         net.eval()
-        for step in range(t):
-            t0 = time.time()
-            m, f, k = to_tensors(obs, device)
-            maps[step], features[step], masks[step], dones[step] = m, f, k, next_done
-            with torch.no_grad():
-                logits, value = net(m, f, k)
-                dist = torch.distributions.Categorical(logits=logits)
-                action = dist.sample()
-            actions[step], logprobs[step], values[step] = action, dist.log_prob(action), value
-            action_np = action.cpu().numpy()  # Waits for the device.
-            t1 = time.time()
+        rollout_start = global_step
+        try:
+            for step in range(t):
+                t0 = time.time()
+                m, f, k = to_tensors(obs, device)
+                maps[step], features[step], masks[step], dones[step] = m, f, k, next_done
+                with torch.no_grad():
+                    logits, value = net(m, f, k)
+                    dist = torch.distributions.Categorical(logits=logits)
+                    action = dist.sample()
+                actions[step], logprobs[step], values[step] = action, dist.log_prob(action), value
+                action_np = action.cpu().numpy()  # Waits for the device.
+                t1 = time.time()
 
-            obs, reward, terminated, truncated, info = envs.step(action_np)
-            t2 = time.time()
-            timing["inference"] += t1 - t0
-            timing["env_step"] += t2 - t1
-            reward = np.asarray(reward, dtype=np.float32)
-            # Episodes cut off by the time limit continue in principle: bootstrap from the
-            # value of their final observation.
-            if truncated.any() and "final_obs" in info:
-                for i in np.nonzero(truncated & ~terminated)[0]:
-                    final = {key: np.asarray(v)[None] for key, v in env_item(info["final_obs"], i).items()}
-                    with torch.no_grad():
-                        reward[i] += args.gamma * float(net(*to_tensors(final, device))[1])
-            rewards[step] = torch.as_tensor(reward, device=device)
-            done = terminated | truncated
-            next_done = torch.as_tensor(done, dtype=torch.float32, device=device)
-            global_step += n
+                obs, reward, terminated, truncated, info = envs.step(action_np)
+                t2 = time.time()
+                timing["inference"] += t1 - t0
+                timing["env_step"] += t2 - t1
+                reward = np.asarray(reward, dtype=np.float32)
+                # Episodes cut off by the time limit continue in principle: bootstrap from the
+                # value of their final observation.
+                if truncated.any() and "final_obs" in info:
+                    for i in np.nonzero(truncated & ~terminated)[0]:
+                        final = {key: np.asarray(v)[None] for key, v in env_item(info["final_obs"], i).items()}
+                        with torch.no_grad():
+                            reward[i] += args.gamma * float(net(*to_tensors(final, device))[1])
+                rewards[step] = torch.as_tensor(reward, device=device)
+                done = terminated | truncated
+                next_done = torch.as_tensor(done, dtype=torch.float32, device=device)
+                global_step += n
 
-            if done.any() and "final_info" in info:
-                for i in np.nonzero(done)[0]:
-                    final = env_item(info["final_info"], i)
-                    scalars = final["scalars"]
-                    difficulty = int(final["ai_difficulty"])
-                    if curriculum.record(difficulty, final["won"]):
-                        print("curriculum: moving up to the %s AI" % AI_DIFFICULTIES[curriculum.level], flush=True)
-                    if args.curriculum:
-                        # The game just started in env i was assigned before; pick the one after it.
-                        next_difficulty[i] = curriculum.sample()
-                    recent.append(
-                        {
-                            "ai_difficulty": difficulty,
-                            "won": bool(final["won"]),
-                            "lost": bool(final["lost"]),
-                            "timed_out": bool(final["timed_out"]),
-                            "minutes": scalars["frame"] / 900,
-                            "harvested": scalars["harvested_credits"],
-                            "kills": scalars["units_killed"] + scalars["buildings_killed"],
-                            "losses": scalars["units_lost"] + scalars["buildings_lost"],
-                        }
-                    )
-            episode_returns_add(recent, done, rewards[step])
-            if args.curriculum and done.any():
-                envs.set_attr("ai_difficulty", next_difficulty)
-            timing["bookkeeping"] += time.time() - t2
+                if done.any() and "final_info" in info:
+                    for i in np.nonzero(done)[0]:
+                        final = env_item(info["final_info"], i)
+                        scalars = final["scalars"]
+                        difficulty = int(final["ai_difficulty"])
+                        if curriculum.record(difficulty, final["won"]):
+                            print("curriculum: moving up to the %s AI" % AI_DIFFICULTIES[curriculum.level], flush=True)
+                        if args.curriculum:
+                            # The game just started in env i was assigned before; pick the one after it.
+                            next_difficulty[i] = curriculum.sample()
+                        recent.append(
+                            {
+                                "ai_difficulty": difficulty,
+                                "won": bool(final["won"]),
+                                "lost": bool(final["lost"]),
+                                "timed_out": bool(final["timed_out"]),
+                                "minutes": scalars["frame"] / 900,
+                                "harvested": scalars["harvested_credits"],
+                                "kills": scalars["units_killed"] + scalars["buildings_killed"],
+                                "losses": scalars["units_lost"] + scalars["buildings_lost"],
+                            }
+                        )
+                episode_returns_add(recent, done, rewards[step])
+                if args.curriculum and done.any():
+                    envs.set_attr("ai_difficulty", next_difficulty)
+                timing["bookkeeping"] += time.time() - t2
+        except (EOFError, BrokenPipeError, ConnectionError) as error:
+            # A game process died, which takes the vector env down: start them again and redo
+            # this update's rollout.
+            restarts += 1
+            print("game process died (%r); restarting them and redoing update %d (restart %d of %d)"
+                  % (error, update, restarts, args.max_restarts), flush=True)
+            if restarts > args.max_restarts:
+                raise
+            try:
+                envs.close(terminate=True)
+            except Exception:
+                pass
+            envs, obs, next_difficulty = start_envs(args.seed + 1000 * update + restarts)
+            next_done = torch.zeros(n, device=device)
+            _running.clear()
+            global_step = rollout_start
+            update -= 1
+            continue
 
         t_update = time.time()
         # Generalised advantage estimation.
@@ -272,7 +310,11 @@ def main():
         b_actions, b_logprobs, b_adv, b_returns = flat(actions), flat(logprobs), flat(advantages), flat(returns)
 
         net.train()
+        minibatches_done = 0
+        stop = False
         for _ in range(args.epochs):
+            if stop:
+                break
             order = torch.randperm(batch, device=device)
             for s in range(0, batch, minibatch):
                 idx = order[s : s + minibatch]
@@ -292,6 +334,10 @@ def main():
                 optimizer.step()
                 with torch.no_grad():
                     approx_kl = ((ratio - 1) - log_ratio).mean()
+                minibatches_done += 1
+                if args.target_kl and approx_kl.item() > args.target_kl:
+                    stop = True  # The policy has moved enough for one update.
+                    break
         sync()
         timing["update"] += time.time() - t_update
         t_log = time.time()
@@ -307,13 +353,14 @@ def main():
             mean("harvested"), mean("kills"), mean("losses"), policy_loss.item(), value_loss.item(),
             entropy.item(), approx_kl.item(),
             AI_DIFFICULTIES[curriculum.level], *(curriculum.win_rate(d) for d in range(len(AI_DIFFICULTIES))),
+            optimizer.param_groups[0]["lr"], minibatches_done,
         ]
         metrics.writerow(row)
         metrics_file.flush()
         print(
             "update %4d  step %8d  %5d sps  episodes %3d  win %.2f  loss %.2f  timeout %.2f  return %6.2f  "
             "minutes %4.1f  harvested %6.0f  kills %4.1f  losses %4.1f  entropy %.2f  "
-            "AI %s  win e/n/h %.2f/%.2f/%.2f"
+            "AI %s  win e/n/h %.2f/%.2f/%.2f  lr %.1e  minibatches %d"
             % tuple(row[:12] + [row[14]] + row[16:]),
             flush=True,
         )
