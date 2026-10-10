@@ -354,7 +354,7 @@ class MacroEnv(gym.Wrapper):
             self.base._native.place(name, int(x), int(y))
 
 
-def make_macro_env(decision_frames=30, max_minutes=30, expert="ai", **kwargs):
+def make_macro_env(decision_frames=30, max_minutes=30, expert="ai", reward=None, **kwargs):
     """A MacroEnv around a TiberianDawnEnv; kwargs go to TiberianDawnEnv."""
     env = TiberianDawnEnv(max_frames=int(max_minutes * 60 * 15), **kwargs)
-    return MacroEnv(env, decision_frames=decision_frames, expert=expert)
+    return MacroEnv(env, decision_frames=decision_frames, reward=reward, expert=expert)

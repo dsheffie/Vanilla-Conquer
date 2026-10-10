@@ -56,7 +56,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 from tdgym.env import GRID, PLANES  # noqa: E402
 from tdgym.env import AI_DIFFICULTIES, SIDES, ai_difficulty_level, parse_maps  # noqa: E402
 from tdgym.expert import VARIANTS  # noqa: E402
-from tdgym.macro import ACTIONS, FEATURES, make_macro_env  # noqa: E402
+from tdgym.macro import ACTIONS, FEATURES, Reward, make_macro_env  # noqa: E402
 
 from curriculum import Curriculum  # noqa: E402
 
@@ -96,6 +96,8 @@ def parse_args():
     p.add_argument("--expert-input", action="store_true", help="give the network the expert's recommendations")
     p.add_argument("--expert-steps", type=int, default=10_000_000, help="steps over which the expert bonus fades out")
     p.add_argument("--max-minutes", type=float, default=30)
+    p.add_argument("--timeout-reward", type=float, default=Reward.timeout,
+                   help="reward for reaching --max-minutes undecided; as low as a loss stops stalling paying off")
     p.add_argument("--decision-frames", type=int, default=30)
     p.add_argument("--save-every", type=int, default=50, help="updates between numbered checkpoints")
     p.add_argument("--resume", help="checkpoint to continue from: weights, optimizer, counters, curriculum")
@@ -120,6 +122,7 @@ def make_env(args):
             agent_side=args.side,
             expert=args.expert,
             ai_difficulty=args.ai_difficulty,
+            reward=Reward(timeout=args.timeout_reward),
         )
 
     return thunk
