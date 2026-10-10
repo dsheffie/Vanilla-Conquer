@@ -19,7 +19,8 @@ and evaluating on them with evaluate.py --maps tests whether the policy generali
 finished game is appended to run-dir/episodes.csv with its map, side and difficulty.
 
 --expert-bonus adds that much reward whenever the agent takes one of the actions the built-in
-AI's own rules would (tdgym/expert.py), fading linearly to zero over --expert-steps, so
+AI's own rules would (tdgym/expert.py; --expert improved for the variant that fills in the
+rules the game leaves unfinished), fading linearly to zero over --expert-steps, so
 early training follows the AI's build order and attack rhythm and the final objective is
 still only winning. The log shows how often the agent agrees with the expert when it has
 a recommendation.
@@ -52,6 +53,7 @@ import numpy as np
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 from tdgym.env import GRID, PLANES  # noqa: E402
 from tdgym.env import AI_DIFFICULTIES, SIDES, ai_difficulty_level, parse_maps  # noqa: E402
+from tdgym.expert import VARIANTS  # noqa: E402
 from tdgym.macro import ACTIONS, FEATURES, make_macro_env  # noqa: E402
 
 from curriculum import Curriculum  # noqa: E402
@@ -88,6 +90,7 @@ def parse_args():
     p.add_argument("--curriculum-floor", type=float, default=0.2)
     p.add_argument("--expert-bonus", type=float, default=0.0,
                    help="reward for taking an action the built-in AI's rules recommend, see above")
+    p.add_argument("--expert", default="ai", choices=VARIANTS, help="which expert rules, see tdgym/expert.py")
     p.add_argument("--expert-steps", type=int, default=10_000_000, help="steps over which the expert bonus fades out")
     p.add_argument("--max-minutes", type=float, default=30)
     p.add_argument("--decision-frames", type=int, default=30)
@@ -112,6 +115,7 @@ def make_env(args):
             max_minutes=args.max_minutes,
             map_number=args.maps,
             agent_side=args.side,
+            expert=args.expert,
             ai_difficulty=args.ai_difficulty,
         )
 
@@ -489,7 +493,7 @@ def report_benchmark(args, out_dir, device, wall_s, setup_s, decisions, updates,
         "settings": {
             "device": str(device), "envs": args.envs, "steps": args.steps, "total_steps": args.total_steps,
             "decision_frames": args.decision_frames, "epochs": args.epochs, "minibatches": args.minibatches,
-            "maps": list(args.maps), "side": args.side, "expert_bonus": args.expert_bonus, "seed": args.seed, "ai_difficulty": args.ai_difficulty,
+            "maps": list(args.maps), "side": args.side, "expert_bonus": args.expert_bonus, "expert": args.expert, "seed": args.seed, "ai_difficulty": args.ai_difficulty,
         },
         "results": {
             "wall_s": round(wall_s, 1),

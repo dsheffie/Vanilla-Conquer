@@ -8,7 +8,7 @@
 
 random picks uniformly among valid actions; scripted follows a fixed build order and
 attacks with a large enough army; expert takes the actions the built-in AI's own rules
-would (tdgym/expert.py); anything else is a checkpoint saved by ppo.py.
+would (tdgym/expert.py; --expert improved for the variant); anything else is a checkpoint saved by ppo.py.
 
 --video records each episode with the real game graphics, as the agent sees them (its own
 shroud), to an MP4 through ffmpeg; with several episodes, game.mp4 becomes game-1.mp4 and
@@ -26,6 +26,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 from tdgym.env import SIDES, parse_maps  # noqa: E402
+from tdgym.expert import VARIANTS  # noqa: E402
 from tdgym.macro import ACTION_INDEX, ACTIONS, make_macro_env  # noqa: E402
 
 BUILD_ORDER = ["build_power", "build_refinery", "build_barracks", "build_power", "build_factory", "build_refinery"]
@@ -163,6 +164,7 @@ def main():
     parser.add_argument("--seed", type=int, default=1000)
     parser.add_argument("--maps", type=parse_maps, default="1", help="maps to play, e.g. 1, 1-8, 1,3,5 or all")
     parser.add_argument("--side", default="gdi", choices=SIDES + ("random",))
+    parser.add_argument("--expert", default="ai", choices=VARIANTS, help="expert rules for --policy expert")
     parser.add_argument("--ai-difficulty", default="normal", choices=["easy", "normal", "hard"])
     parser.add_argument("--max-minutes", type=float, default=30)
     parser.add_argument("--show-actions", action="store_true")
@@ -184,7 +186,7 @@ def main():
     if args.video:
         video = {"path": args.video, "speed": args.video_speed, "fps": args.video_fps, "scale": args.video_scale}
     results = evaluate(
-        policy, args.episodes, args.seed, {"map_number": args.maps, "agent_side": args.side, "max_minutes": args.max_minutes, "ai_difficulty": args.ai_difficulty}, video
+        policy, args.episodes, args.seed, {"map_number": args.maps, "agent_side": args.side, "expert": args.expert, "max_minutes": args.max_minutes, "ai_difficulty": args.ai_difficulty}, video
     )
     for r in results:
         outcome = "won" if r["won"] else "lost" if r["lost"] else "time limit"

@@ -16,6 +16,21 @@ tiberiandawn/house.cpp with the default rules.ini values:
 
 It reads only what the agent observes, and only recommends actions the mask allows. The
 AI's hidden scenario state (teams, IQ, the house it has picked as its enemy) is left out.
+
+variant="improved" adds rules the game's AI code plans but never finished, and avoids the
+money lock-up that the faithful rules run into when replayed through MacroEnv:
+
+- Power first (Check_Build_Power, active in Red Alert, a stub in TD): high urgency whenever
+  the surplus is 50 or less, critical when short, low only before the first refinery.
+- Income (Check_Build_Income, only a comment in the game): refineries are high urgency
+  while there are fewer than two, medium while money is under 1,000, low otherwise; and
+  two are wanted whatever the base size, since with one harvester the base never reaches
+  the six buildings the 18% ratio needs for a second.
+- Barracks medium rather than high when there are none, as in Red Alert.
+- Only start what is affordable now. When the most urgent building isn't, save for it:
+  recommend no building, and only units that leave its cost in the bank (harvesters
+  excepted). The faithful rules start it on credit whenever there is any income, and TD
+  then drains money into it as it builds, starving everything else.
 """
 
 import math
@@ -39,6 +54,7 @@ INFANTRY_RESERVE = 3000
 ATTACK_INTERVAL = 3  # Times half a minute to two minutes between attacks.
 
 LOW, MEDIUM, HIGH, CRITICAL = 1, 2, 3, 4
+VARIANTS = ("ai", "improved")
 
 ARMED_VEHICLES = ("light_vehicle", "bike", "apc", "tank", "heavy_tank", "artillery", "stealth_tank",
                   "rocket_launcher")
@@ -52,13 +68,17 @@ def _round_up(ratio, buildings):
 class Expert:
     """The built-in AI's choices for a MacroEnv; call reset() at each episode start."""
 
-    def __init__(self, macro):
+    def __init__(self, macro, variant="ai"):
+        if variant not in VARIANTS:
+            raise ValueError("expert variant must be one of %s" % (VARIANTS,))
         self.macro = macro
+        self.improved = variant == "improved"
         self.reset()
 
     def reset(self):
         self._next_attack = TICKS_PER_MINUTE
         self._harvesters = {}  # id: last frame seen.
+        self._reserve = 0  # Credits being saved for a building, for the improved variant.
 
     def note_action(self, name, frame):
         """The agent took action 'name' at game frame 'frame': an attack restarts the timer."""
@@ -152,27 +172,41 @@ class Expert:
         count, money, b = s["count"], s["money"], s["buildings"]
         refineries = count("PROC")
         income = refineries > 0 and count("HARV") > 0
-        choices = []
+        improved = self.improved
+        choices = []  # (urgency, action, cost)
 
-        def offer(role, urgency, need_money=True):
+        def offer(role, urgency, can_afford=None):
             cost = self._cost(role)
-            if cost is not None and (cost < money or (income and need_money)):
-                choices.append((urgency, "build_" + role))
+            if cost is None:
+                return
+            if can_afford is None:
+                can_afford = cost < money or income
+            # The improved rules consider everything, and decide below whether to start it
+            # or save for it.
+            if improved or can_afford:
+                choices.append((urgency, "build_" + role, cost))
 
         if s["power"] <= s["drain"] + POWER_SURPLUS:
-            urgency = LOW if refineries == 0 else CRITICAL if s["power"] < s["drain"] else MEDIUM
+            short = s["power"] < s["drain"]
+            urgency = LOW if refineries == 0 else CRITICAL if short else HIGH if improved else MEDIUM
             for role in ("advanced_power", "power"):
                 cost = self._cost(role)
-                if cost is not None and cost < money:
-                    choices.append((urgency, "build_" + role))
+                if cost is not None and (cost < money or (improved and role == "power")):
+                    offer(role, urgency, cost < money)
                     break
-        if refineries < _round_up(REFINERY_RATIO, b) and refineries < REFINERY_LIMIT:
+        # One harvester can't grow a base to the 6 buildings the ratio wants for a second
+        # refinery, so the improved rules always allow two.
+        wanted = max(_round_up(REFINERY_RATIO, b), 2 if improved else 0)
+        if refineries < wanted and refineries < REFINERY_LIMIT:
+            if improved:
+                urgency = HIGH if refineries < 2 else MEDIUM if money < 1000 else LOW
+            else:
+                urgency = HIGH if refineries < 2 else MEDIUM
             cost = self._cost("refinery")
-            if cost is not None and (money > cost or income):
-                choices.append((HIGH if refineries < 2 else MEDIUM, "build_refinery"))
+            offer("refinery", urgency, cost is not None and (money > cost or income))
         current = count("PYLE", "HAND")
         if current < _round_up(BARRACKS_RATIO, b) and current < BARRACKS_LIMIT and (money > 300 or income):
-            offer("barracks", LOW if current else HIGH)
+            offer("barracks", LOW if current else MEDIUM if improved else HIGH)
         current = count("WEAP", "AFLD")
         if current < _round_up(WAR_RATIO, b) and current < WAR_LIMIT and (money > 2000 or income):
             if (refineries <= 3 and current < 1) or (refineries >= 5 and current < 2):
@@ -200,28 +234,34 @@ class Expert:
                 offer("radar", HIGH)
             urgency = HIGH if current < s["enemy_aircraft"] else MEDIUM
             offer("advanced_defense" if not s["nod"] else "anti_air", urgency)
+
+        self._reserve = 0
         if not choices:
             return []
-        best = max(u for u, _ in choices)
-        return sorted({name for u, name in choices if u == best})
+        best_urgency = max(u for u, _, _ in choices)
+        best = [(name, cost) for u, name, cost in choices if u == best_urgency]
+        if improved:
+            affordable = [(name, cost) for name, cost in best if cost <= money]
+            if not affordable:
+                self._reserve = min(cost for _, cost in best)
+                return []
+            best = affordable
+        return sorted({name for name, _ in best})
 
     def _vehicle(self, s):
         """AI_Unit: harvesters to match refineries, then any armed vehicle."""
         count = s["count"]
         if count("PROC") > count("HARV") and self._cost("harvester", "train_") is not None:
             return ["train_harvester"]
-        return [
-            "train_" + role
-            for role in ARMED_VEHICLES
-            if (cost := self._cost(role, "train_")) is not None and cost <= s["money"]
-        ]
+        return self._affordable(ARMED_VEHICLES, s)
 
     def _infantry(self, s):
         """AI_Infantry: basic infantry while short of infantry or with money to spare."""
         if not (s["money"] > INFANTRY_RESERVE or s["infantry"] < s["buildings"]):
             return []
-        return [
-            "train_" + role
-            for role in INFANTRY_ROLES
-            if (cost := self._cost(role, "train_")) is not None and cost <= s["money"]
-        ]
+        return self._affordable(INFANTRY_ROLES, s)
+
+    def _affordable(self, roles, s):
+        """Units of 'roles' that fit in the money, less any savings for a building."""
+        budget = s["money"] - self._reserve
+        return ["train_" + role for role in roles if (cost := self._cost(role, "train_")) is not None and cost <= budget]

@@ -113,11 +113,11 @@ class MacroEnv(gym.Wrapper):
       features: float32 (FEATURES,), log-scaled scalars and buildables.
       mask:     int8 (len(ACTIONS),), 1 for actions that can apply now.
       expert:   int8 (len(ACTIONS),), 1 for the actions the built-in AI would take now
-                (see expert.py); all 0 when it would wait.
+                (see expert.py, expert= picks the variant); all 0 when it would wait.
     Action: Discrete(len(ACTIONS)), see ACTIONS.
     """
 
-    def __init__(self, env, decision_frames=30, reward=None):
+    def __init__(self, env, decision_frames=30, reward=None, expert="ai"):
         super().__init__(env)
         self.base = env.unwrapped
         self.base.frame_skip = decision_frames
@@ -131,7 +131,7 @@ class MacroEnv(gym.Wrapper):
             }
         )
         self.action_space = spaces.Discrete(len(ACTIONS))
-        self.expert = Expert(self)
+        self.expert = Expert(self, expert)
 
     @property
     def ai_difficulty(self):
@@ -298,7 +298,7 @@ class MacroEnv(gym.Wrapper):
             self.base._native.place(name, int(x), int(y))
 
 
-def make_macro_env(decision_frames=30, max_minutes=30, **kwargs):
+def make_macro_env(decision_frames=30, max_minutes=30, expert="ai", **kwargs):
     """A MacroEnv around a TiberianDawnEnv; kwargs go to TiberianDawnEnv."""
     env = TiberianDawnEnv(max_frames=int(max_minutes * 60 * 15), **kwargs)
-    return MacroEnv(env, decision_frames=decision_frames)
+    return MacroEnv(env, decision_frames=decision_frames, expert=expert)

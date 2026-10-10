@@ -151,10 +151,22 @@ on `--maps 9,77,96`. All runs before this used map 1 as GDI only.
 MacroEnv's observation carries `expert`, a mask of the actions the AI would take now.
 `--expert-bonus B` rewards the agent B for taking one, fading to zero over `--expert-steps`
 (default 10M); the log's `expert agree` is how often it does when the expert has advice.
-`evaluate.py --policy expert` plays the rules directly. They lose as the agent: 0 of 8
-games against easy and normal on map 1, mostly short of money (2,800-18,000 credits
-harvested in 30 minutes) with few factories and tanks. So the bonus teaches a sane build
-order and attack rhythm, not a winning game, and needs to fade out.
+`evaluate.py --policy expert [--expert improved]` plays the rules directly.
+
+`--expert improved` (on ppo.py and evaluate.py) fills in rules the game's AI code plans but
+never finished: power first, refineries by income need (at least two), and never starting
+what it can't afford but saving for it instead. The faithful rules start buildings on
+credit, and TD then drains every credit into them as they build, which starves the rest
+of the base. Over the same 16 games on map 1 (seeds 1000-1031, 8 vs easy and 8 vs normal):
+
+| expert   | won | lost | time limit | mean return | harvested |
+|----------|-----|------|------------|-------------|-----------|
+| ai       | 0   | 8    | 8          | -10.4       | 9,700     |
+| improved | 0   | 1    | 15         | -8.5        | 15,200    |
+
+Neither wins: the improved rules hold their own but can't destroy the AI's base with
+MacroEnv's attack (light vehicles and infantry sent at the nearest known building). So
+the bonus teaches a sound economy and build order, not how to win, and needs to fade out.
 
 `--device auto` picks CUDA, then MPS, then CPU. `--envs` is one game per process; use
 about one per core and leave a few cores for the learner. Resume with `--resume runs/NAME/latest.pt`.
