@@ -283,6 +283,13 @@ void Observe_Sidebar()
     Scalars.units_lost = sidebar->UnitsLost;
     Scalars.buildings_lost = sidebar->BuildingsLost;
     Scalars.harvested_credits = sidebar->TotalHarvestedCredits;
+    int economy[4] = {};
+    if (Game.Get_Economy_Stats(AGENT, economy)) {
+        Scalars.refineries_killed = economy[0];
+        Scalars.harvesters_killed = economy[1];
+        Scalars.refineries_lost = economy[2];
+        Scalars.harvesters_lost = economy[3];
+    }
 
     int count = sidebar->EntryCount[0] + sidebar->EntryCount[1];
     for (int i = 0; i < count; ++i) {

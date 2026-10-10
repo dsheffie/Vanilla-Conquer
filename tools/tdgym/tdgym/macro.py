@@ -105,6 +105,13 @@ class Reward:
     # Per credit harvested. Enough to get an economy going, too little to be the goal:
     # a strong 30 minute economy (~45k credits) is worth about 0.45.
     harvested: float = 0.00001
+    # The economy, weighted well above other kills and losses: destroying the enemy's
+    # harvesters and refineries starves its army, and losing one's own does the same to us.
+    # On top of the building and unit terms above.
+    enemy_refinery_destroyed: float = 1.0
+    enemy_harvester_killed: float = 1.0
+    refinery_lost: float = -1.0
+    harvester_lost: float = -1.0
 
     def __call__(self, previous, scalars, explored_delta, won, lost, timed_out):
         delta = {k: scalars[k] - previous[k] for k in scalars}
@@ -118,6 +125,10 @@ class Reward:
             + self.unit_lost * delta["units_lost"]
             + self.explored * explored_delta
             + self.harvested * delta["harvested_credits"]
+            + self.enemy_refinery_destroyed * delta.get("refineries_killed", 0)
+            + self.enemy_harvester_killed * delta.get("harvesters_killed", 0)
+            + self.refinery_lost * delta.get("refineries_lost", 0)
+            + self.harvester_lost * delta.get("harvesters_lost", 0)
         )
 
 

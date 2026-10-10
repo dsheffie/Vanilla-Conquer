@@ -398,6 +398,13 @@ public:
     unsigned BuildingsLost;
 
     /*
+    ** Of those, how many were the house's harvesters and refineries: its economy. For
+    ** CNC_Get_Economy_Stats.
+    */
+    unsigned HarvestersLost;
+    unsigned RefineriesLost;
+
+    /*
     ** For multiplayer games, this keeps track of the last house to destroy
     ** one of my units.
     */

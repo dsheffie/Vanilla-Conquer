@@ -192,6 +192,7 @@ bool GameLib::Load(const std::string& path, EventCallback callback, std::string&
               && Lookup(Handle, "CNC_Free_Game", Free_Game, error)
               && Lookup(Handle, "CNC_Set_AI_Difficulty", Set_AI_Difficulty, error)
               && Lookup(Handle, "CNC_Selected_Hunt", Selected_Hunt, error)
+              && Lookup(Handle, "CNC_Get_Economy_Stats", Get_Economy_Stats, error)
               && Lookup(Handle, "CNC_Config", Config, error)
               && Lookup(Handle, "CNC_Get_Visible_Page", Get_Visible_Page, error)
               && Lookup(Handle, "CNC_Get_Palette", Get_Palette, error)

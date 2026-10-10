@@ -219,6 +219,7 @@ extern "C" __declspec(dllexport) void __cdecl CNC_Set_Headless(bool headless);
 extern "C" __declspec(dllexport) void __cdecl CNC_Free_Game(void);
 extern "C" __declspec(dllexport) void __cdecl CNC_Set_AI_Difficulty(int difficulty);
 extern "C" __declspec(dllexport) void __cdecl CNC_Selected_Hunt(uint64 player_id);
+extern "C" __declspec(dllexport) bool __cdecl CNC_Get_Economy_Stats(uint64 player_id, int* stats);
 
 /*
 ** Handicap for AI players in multiplayer games, set by CNC_Set_AI_Difficulty; -1 leaves the
@@ -2013,6 +2014,24 @@ extern "C" __declspec(dllexport) void __cdecl CNC_Set_AI_Difficulty(int difficul
 extern "C" __declspec(dllexport) void __cdecl CNC_Selected_Hunt(uint64 player_id)
 {
     DLLExportClass::Selected_Hunt(player_id);
+}
+
+/**************************************************************************************************
+ * CNC_Get_Economy_Stats -- Harvesters and refineries the player has destroyed and lost
+ *
+ * stats receives four counts: enemy refineries destroyed, enemy harvesters destroyed, own
+ * refineries lost, own harvesters lost. The sidebar only has totals over all types.
+ **************************************************************************************************/
+extern "C" __declspec(dllexport) bool __cdecl CNC_Get_Economy_Stats(uint64 player_id, int* stats)
+{
+    if (!DLLExportClass::Set_Player_Context(player_id) || PlayerPtr == NULL) {
+        return false;
+    }
+    stats[0] = (int)PlayerPtr->DestroyedBuildings.Get_Unit_Total(STRUCT_REFINERY);
+    stats[1] = (int)PlayerPtr->DestroyedUnits.Get_Unit_Total(UNIT_HARVESTER);
+    stats[2] = (int)PlayerPtr->RefineriesLost;
+    stats[3] = (int)PlayerPtr->HarvestersLost;
+    return true;
 }
 
 /**************************************************************************************************

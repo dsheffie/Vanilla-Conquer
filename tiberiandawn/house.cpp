@@ -382,6 +382,8 @@ HouseClass::HouseClass(HousesType house)
     Blockage = 0;
     UnitsLost = 0;
     BuildingsLost = 0;
+    HarvestersLost = 0;
+    RefineriesLost = 0;
 
     NewActiveBScan = 0;
     ActiveBScan = 0;

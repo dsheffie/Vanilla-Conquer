@@ -96,6 +96,8 @@ def parse_args():
     p.add_argument("--expert-input", action="store_true", help="give the network the expert's recommendations")
     p.add_argument("--expert-steps", type=int, default=10_000_000, help="steps over which the expert bonus fades out")
     p.add_argument("--max-minutes", type=float, default=30)
+    p.add_argument("--economy-reward", type=float, default=Reward.enemy_harvester_killed,
+                   help="reward per enemy harvester or refinery destroyed, and penalty per own one lost")
     p.add_argument("--timeout-reward", type=float, default=Reward.timeout,
                    help="reward for reaching --max-minutes undecided; as low as a loss stops stalling paying off")
     p.add_argument("--decision-frames", type=int, default=30)
@@ -122,7 +124,13 @@ def make_env(args):
             agent_side=args.side,
             expert=args.expert,
             ai_difficulty=args.ai_difficulty,
-            reward=Reward(timeout=args.timeout_reward),
+            reward=Reward(
+                timeout=args.timeout_reward,
+                enemy_refinery_destroyed=args.economy_reward,
+                enemy_harvester_killed=args.economy_reward,
+                refinery_lost=-args.economy_reward,
+                harvester_lost=-args.economy_reward,
+            ),
         )
 
     return thunk
@@ -236,7 +244,8 @@ def main():
     if new_file:
         episodes_log.writerow(
             ["update", "global_step", "map", "side", "ai_difficulty", "won", "lost", "timed_out", "minutes",
-             "harvested", "kills", "losses"]
+             "harvested", "kills", "losses", "harvesters_killed", "refineries_killed", "harvesters_lost",
+             "refineries_lost"]
         )
     metrics_path = os.path.join(args.run_dir, "metrics.csv")
     new_file = not os.path.exists(metrics_path)
@@ -351,7 +360,9 @@ def main():
                         episodes_log.writerow(
                             [update, global_step, final["map_number"], SIDES[final["agent_side"]],
                              AI_DIFFICULTIES[difficulty], int(e["won"]), int(e["lost"]), int(e["timed_out"]),
-                             round(e["minutes"], 2), e["harvested"], e["kills"], e["losses"]]
+                             round(e["minutes"], 2), e["harvested"], e["kills"], e["losses"],
+                             scalars["harvesters_killed"], scalars["refineries_killed"], scalars["harvesters_lost"],
+                             scalars["refineries_lost"]]
                         )
                 episode_returns_add(recent, done, rewards[step])
                 if args.curriculum and done.any():

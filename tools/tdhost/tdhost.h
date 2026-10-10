@@ -95,6 +95,7 @@ public:
     void(__cdecl* Free_Game)(void) = nullptr;
     void(__cdecl* Set_AI_Difficulty)(int) = nullptr;
     void(__cdecl* Selected_Hunt)(uint64_t) = nullptr;
+    bool(__cdecl* Get_Economy_Stats)(uint64_t, int*) = nullptr;
     void(__cdecl* Config)(const CNCRulesDataStruct&) = nullptr;
     bool(__cdecl* Get_Visible_Page)(unsigned char*, unsigned int&, unsigned int&) = nullptr;
     bool(__cdecl* Get_Palette)(unsigned char (&)[256][3]) = nullptr;

@@ -3178,9 +3178,12 @@ void TechnoClass::Record_The_Kill(TechnoClass* source)
     case RTTI_BUILDING:
         if (((BuildingClass*)this)->WhoLastHurtMe != HOUSE_NONE) {
             House->BuildingsLost++;
+            if (((BuildingClass*)this)->Class->Type == STRUCT_REFINERY) {
+                House->RefineriesLost++;
+            }
         }
         if (source) {
-            if (GameToPlay == GAME_INTERNET) {
+            if (GameToPlay == GAME_INTERNET || GameToPlay == GAME_GLYPHX_MULTIPLAYER) {
                 source->House->DestroyedBuildings.Increment_Unit_Total(((BuildingClass*)this)->Class->Type);
             }
             source->House->BuildingsKilled[Owner()]++;
@@ -3198,7 +3201,7 @@ void TechnoClass::Record_The_Kill(TechnoClass* source)
     case RTTI_AIRCRAFT:
         House->UnitsLost++;
         if (source) {
-            if (GameToPlay == GAME_INTERNET) {
+            if (GameToPlay == GAME_INTERNET || GameToPlay == GAME_GLYPHX_MULTIPLAYER) {
                 source->House->DestroyedAircraft.Increment_Unit_Total(((AircraftClass*)this)->Class->Type);
             }
             source->House->UnitsKilled[Owner()]++;
@@ -3215,7 +3218,7 @@ void TechnoClass::Record_The_Kill(TechnoClass* source)
     case RTTI_INFANTRY:
         House->UnitsLost++;
         if (source) {
-            if (GameToPlay == GAME_INTERNET) {
+            if (GameToPlay == GAME_INTERNET || GameToPlay == GAME_GLYPHX_MULTIPLAYER) {
                 source->House->DestroyedInfantry.Increment_Unit_Total(((InfantryClass*)this)->Class->Type);
             }
             source->House->UnitsKilled[Owner()]++;
@@ -3231,8 +3234,11 @@ void TechnoClass::Record_The_Kill(TechnoClass* source)
 
     case RTTI_UNIT:
         House->UnitsLost++;
+        if (((UnitClass*)this)->Class->Type == UNIT_HARVESTER) {
+            House->HarvestersLost++;
+        }
         if (source) {
-            if (GameToPlay == GAME_INTERNET) {
+            if (GameToPlay == GAME_INTERNET || GameToPlay == GAME_GLYPHX_MULTIPLAYER) {
                 source->House->DestroyedUnits.Increment_Unit_Total(((UnitClass*)this)->Class->Type);
             }
             source->House->UnitsKilled[Owner()]++;

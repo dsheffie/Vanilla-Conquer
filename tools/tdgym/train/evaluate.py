@@ -151,6 +151,8 @@ def evaluate(policy, episodes, seed, env_kwargs, video=None):
                 "harvested": info["scalars"]["harvested_credits"],
                 "kills": info["scalars"]["units_killed"] + info["scalars"]["buildings_killed"],
                 "losses": info["scalars"]["units_lost"] + info["scalars"]["buildings_lost"],
+                "economy": tuple(info["scalars"][k] for k in ("harvesters_killed", "refineries_killed",
+                                                              "harvesters_lost", "refineries_lost")),
                 "actions": counts,
             }
         )
@@ -201,8 +203,10 @@ def main():
     for r in results:
         outcome = "won" if r["won"] else "lost" if r["lost"] else "time limit"
         print(
-            "map %d %-3s  %-10s %5.1f min  return %6.2f  harvested %6d  kills %3d  losses %3d"
-            % (r["map"], r["side"], outcome, r["minutes"], r["return"], r["harvested"], r["kills"], r["losses"])
+            "map %d %-3s  %-10s %5.1f min  return %6.2f  harvested %6d  kills %3d  losses %3d  "
+            "harvesters/refineries killed %d/%d lost %d/%d"
+            % (r["map"], r["side"], outcome, r["minutes"], r["return"], r["harvested"], r["kills"], r["losses"],
+               *r["economy"])
         )
         if "video" in r:
             print("    video %s: %d frames, %.0f s" % (r["video"][0], r["video"][1], r["video"][1] / args.video_fps))

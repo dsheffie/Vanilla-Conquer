@@ -72,6 +72,10 @@ class TDScalars(ctypes.Structure):
             "buildings_lost",
             "harvested_credits",
             "defeated",
+            "refineries_killed",
+            "harvesters_killed",
+            "refineries_lost",
+            "harvesters_lost",
         )
     ]
 

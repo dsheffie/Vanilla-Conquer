@@ -88,6 +88,11 @@ typedef struct
     int buildings_lost;
     int harvested_credits;
     int defeated;
+    /* The economy: enemy refineries and harvesters destroyed, and own ones lost. */
+    int refineries_killed;
+    int harvesters_killed;
+    int refineries_lost;
+    int harvesters_lost;
 } TDScalars;
 
 /* Last error message, for any call that failed. */
