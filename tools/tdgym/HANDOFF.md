@@ -146,6 +146,16 @@ training game goes to `episodes.csv` with its map, side and difficulty, for win 
 map. To test generalisation, hold maps out, e.g. train on `--maps 1-8,70-74` and evaluate
 on `--maps 9,77,96`. All runs before this used map 1 as GDI only.
 
+**Expert bonus:** `tdgym/expert.py` ports the built-in skirmish AI's rules (`AI_Building`,
+`AI_Unit`, `AI_Infantry`, `Expert_AI`/`AI_Attack` in house.cpp) to MacroEnv actions, and
+MacroEnv's observation carries `expert`, a mask of the actions the AI would take now.
+`--expert-bonus B` rewards the agent B for taking one, fading to zero over `--expert-steps`
+(default 10M); the log's `expert agree` is how often it does when the expert has advice.
+`evaluate.py --policy expert` plays the rules directly. They lose as the agent: 0 of 8
+games against easy and normal on map 1, mostly short of money (2,800-18,000 credits
+harvested in 30 minutes) with few factories and tanks. So the bonus teaches a sane build
+order and attack rhythm, not a winning game, and needs to fade out.
+
 `--device auto` picks CUDA, then MPS, then CPU. `--envs` is one game per process; use
 about one per core and leave a few cores for the learner. Resume with `--resume runs/NAME/latest.pt`.
 Progress is in `runs/NAME/metrics.csv` (one row per update); watch `win_rate`,

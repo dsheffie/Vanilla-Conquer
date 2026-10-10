@@ -17,6 +17,7 @@ from gymnasium import spaces
 
 from ._native import AIRCRAFT, BUILDING, ENEMY, INFANTRY, SELF, UNIT
 from .env import BUILDABLE_FEATURES, CATALOG, CATALOG_INDEX, GRID, PLANES, SCALARS, TiberianDawnEnv
+from .expert import Expert
 
 # Roles, each a list of sidebar names in preference order: GDI and Nod build different
 # things for the same job.
@@ -111,6 +112,8 @@ class MacroEnv(gym.Wrapper):
       map:      uint8 (len(PLANES), 64, 64), as TiberianDawnEnv.
       features: float32 (FEATURES,), log-scaled scalars and buildables.
       mask:     int8 (len(ACTIONS),), 1 for actions that can apply now.
+      expert:   int8 (len(ACTIONS),), 1 for the actions the built-in AI would take now
+                (see expert.py); all 0 when it would wait.
     Action: Discrete(len(ACTIONS)), see ACTIONS.
     """
 
@@ -124,9 +127,11 @@ class MacroEnv(gym.Wrapper):
                 "map": env.observation_space["map"],
                 "features": spaces.Box(-np.inf, np.inf, (FEATURES,), np.float32),
                 "mask": spaces.Box(0, 1, (len(ACTIONS),), np.int8),
+                "expert": spaces.Box(0, 1, (len(ACTIONS),), np.int8),
             }
         )
         self.action_space = spaces.Discrete(len(ACTIONS))
+        self.expert = Expert(self)
 
     @property
     def ai_difficulty(self):
@@ -139,12 +144,14 @@ class MacroEnv(gym.Wrapper):
 
     def reset(self, **kwargs):
         obs, info = self.env.reset(**kwargs)
+        self.expert.reset()
         self._explored_fraction = self._explored_now()
         return self._wrap(obs), info
 
     def step(self, action):
         previous = self.base._scalars
         self._apply(int(action))
+        self.expert.note_action(ACTIONS[int(action)], previous["frame"])
         self._place_finished()
         obs, _, terminated, truncated, info = self.env.step(np.zeros(6, dtype=np.int64))
         won = terminated and info["status"] == 1
@@ -168,7 +175,8 @@ class MacroEnv(gym.Wrapper):
         buildables = obs["buildables"].copy()
         buildables[:, 1] = np.log1p(buildables[:, 1])  # cost
         features = np.concatenate([scalars, buildables.ravel()]).astype(np.float32)
-        return {"map": obs["map"], "features": features, "mask": self.action_mask()}
+        mask = self.action_mask()
+        return {"map": obs["map"], "features": features, "mask": mask, "expert": self.expert.mask(mask)}
 
     def action_mask(self):
         mask = np.zeros(len(ACTIONS), dtype=np.int8)

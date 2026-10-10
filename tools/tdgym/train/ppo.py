@@ -18,6 +18,12 @@ tdgym.env.MAPS), and --side random plays GDI or Nod at random; holding maps out 
 and evaluating on them with evaluate.py --maps tests whether the policy generalises. Every
 finished game is appended to run-dir/episodes.csv with its map, side and difficulty.
 
+--expert-bonus adds that much reward whenever the agent takes one of the actions the built-in
+AI's own rules would (tdgym/expert.py), fading linearly to zero over --expert-steps, so
+early training follows the AI's build order and attack rhythm and the final objective is
+still only winning. The log shows how often the agent agrees with the expert when it has
+a recommendation.
+
 --benchmark trains for --total-steps with fixed seeds and no checkpoints, then reports the
 wall time and where it went (game processes, policy inference, PPO updates), with the
 machine and settings, to stdout and run-dir/benchmark.json if --run-dir is given.
@@ -80,6 +86,9 @@ def parse_args():
     p.add_argument("--curriculum-threshold", type=float, default=0.5)
     p.add_argument("--curriculum-window", type=int, default=100)
     p.add_argument("--curriculum-floor", type=float, default=0.2)
+    p.add_argument("--expert-bonus", type=float, default=0.0,
+                   help="reward for taking an action the built-in AI's rules recommend, see above")
+    p.add_argument("--expert-steps", type=int, default=10_000_000, help="steps over which the expert bonus fades out")
     p.add_argument("--max-minutes", type=float, default=30)
     p.add_argument("--decision-frames", type=int, default=30)
     p.add_argument("--save-every", type=int, default=50, help="updates between numbered checkpoints")
@@ -190,7 +199,7 @@ def main():
         metrics.writerow(
             ["update", "global_step", "sps", "episodes", "win_rate", "loss_rate", "timeout_rate", "return", "minutes",
              "harvested", "kills", "losses", "policy_loss", "value_loss", "entropy", "approx_kl",
-             "level", "win_easy", "win_normal", "win_hard", "lr", "minibatches"]
+             "level", "win_easy", "win_normal", "win_hard", "lr", "minibatches", "expert_agree", "expert_bonus"]
         )
 
     def start_envs(seed):
@@ -215,6 +224,7 @@ def main():
     batch = n * t
     minibatch = batch // args.minibatches
     timing = collections.Counter()  # Seconds spent in each phase.
+    expert_counts = collections.Counter()  # Decisions the expert advised on, and followed, this update.
 
     def sync():
         if args.benchmark and device.type == "cuda":
@@ -241,6 +251,7 @@ def main():
                     action = dist.sample()
                 actions[step], logprobs[step], values[step] = action, dist.log_prob(action), value
                 action_np = action.cpu().numpy()  # Waits for the device.
+                expert = np.asarray(obs["expert"])
                 t1 = time.time()
 
                 obs, reward, terminated, truncated, info = envs.step(action_np)
@@ -255,6 +266,13 @@ def main():
                         final = {key: np.asarray(v)[None] for key, v in env_item(info["final_obs"], i).items()}
                         with torch.no_grad():
                             reward[i] += args.gamma * float(net(*to_tensors(final, device))[1])
+                advised = expert.any(axis=1)
+                followed = expert[np.arange(n), action_np].astype(bool)
+                expert_counts["advised"] += int(advised.sum())
+                expert_counts["followed"] += int(followed.sum())
+                bonus = args.expert_bonus * max(1.0 - global_step / args.expert_steps, 0.0)
+                if bonus:
+                    reward += bonus * followed
                 rewards[step] = torch.as_tensor(reward, device=device)
                 done = terminated | truncated
                 next_done = torch.as_tensor(done, dtype=torch.float32, device=device)
@@ -376,14 +394,17 @@ def main():
             entropy.item(), approx_kl.item(),
             AI_DIFFICULTIES[curriculum.level], *(curriculum.win_rate(d) for d in range(len(AI_DIFFICULTIES))),
             optimizer.param_groups[0]["lr"], minibatches_done,
+            expert_counts["followed"] / max(expert_counts["advised"], 1),
+            args.expert_bonus * max(1.0 - global_step / args.expert_steps, 0.0),
         ]
+        expert_counts.clear()
         metrics.writerow(row)
         metrics_file.flush()
         episodes_file.flush()
         print(
             "update %4d  step %8d  %5d sps  episodes %3d  win %.2f  loss %.2f  timeout %.2f  return %6.2f  "
             "minutes %4.1f  harvested %6.0f  kills %4.1f  losses %4.1f  entropy %.2f  "
-            "AI %s  win e/n/h %.2f/%.2f/%.2f  lr %.1e  minibatches %d"
+            "AI %s  win e/n/h %.2f/%.2f/%.2f  lr %.1e  minibatches %d  expert agree %.2f bonus %.3f"
             % tuple(row[:12] + [row[14]] + row[16:]),
             flush=True,
         )
@@ -468,7 +489,7 @@ def report_benchmark(args, out_dir, device, wall_s, setup_s, decisions, updates,
         "settings": {
             "device": str(device), "envs": args.envs, "steps": args.steps, "total_steps": args.total_steps,
             "decision_frames": args.decision_frames, "epochs": args.epochs, "minibatches": args.minibatches,
-            "maps": list(args.maps), "side": args.side, "seed": args.seed, "ai_difficulty": args.ai_difficulty,
+            "maps": list(args.maps), "side": args.side, "expert_bonus": args.expert_bonus, "seed": args.seed, "ai_difficulty": args.ai_difficulty,
         },
         "results": {
             "wall_s": round(wall_s, 1),

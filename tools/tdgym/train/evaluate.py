@@ -1,13 +1,14 @@
 """Play MacroEnv episodes against the built-in AI and report results.
 
-    python evaluate.py --policy random|scripted|CHECKPOINT [--episodes N]
+    python evaluate.py --policy random|scripted|expert|CHECKPOINT [--episodes N]
     python evaluate.py --policy CHECKPOINT --episodes 1 --video game.mp4 [--video-speed 8] [--video-scale 0.5]
     python evaluate.py --policy CHECKPOINT --episodes 18 --maps 9 --side random
 
 --maps and --side work as in ppo.py: each episode picks its map and side at random.
 
 random picks uniformly among valid actions; scripted follows a fixed build order and
-attacks with a large enough army; anything else is a checkpoint saved by ppo.py.
+attacks with a large enough army; expert takes the actions the built-in AI's own rules
+would (tdgym/expert.py); anything else is a checkpoint saved by ppo.py.
 
 --video records each episode with the real game graphics, as the agent sees them (its own
 shroud), to an MP4 through ffmpeg; with several episodes, game.mp4 becomes game-1.mp4 and
@@ -115,6 +116,9 @@ def evaluate(policy, episodes, seed, env_kwargs, video=None):
         every = max(1, round(15 * video["speed"] / video["fps"]))
         env_kwargs = dict(env_kwargs, render_mode="rgb_array", frame_every=every)
     env = make_macro_env(**env_kwargs)
+    if policy == "expert":
+        rng = np.random.default_rng(seed)
+        policy = lambda obs, state: env.expert.choose(obs["mask"], rng)  # noqa: E731
     results = []
     for episode in range(episodes):
         if video:
@@ -172,6 +176,8 @@ def main():
         policy = random_policy
     elif args.policy == "scripted":
         policy = scripted
+    elif args.policy == "expert":
+        policy = "expert"  # Needs the env; evaluate() binds it.
     else:
         policy = model_policy(args.policy)
     video = None
