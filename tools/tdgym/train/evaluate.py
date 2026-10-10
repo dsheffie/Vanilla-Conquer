@@ -65,12 +65,16 @@ def model_policy(path, device="cpu"):
     net = Policy(**checkpoint["shape"]).to(device)
     net.load_state_dict(checkpoint["model"])
     net.eval()
+    expert_input = checkpoint["args"].get("expert_input", False)
 
     def act(obs, state):
+        features = obs["features"]
+        if expert_input:
+            features = np.concatenate([features, obs["expert"].astype(np.float32)])
         with torch.no_grad():
             logits, _ = net(
                 torch.as_tensor(obs["map"][None], device=device),
-                torch.as_tensor(obs["features"][None], device=device),
+                torch.as_tensor(features[None], device=device),
                 torch.as_tensor(obs["mask"][None], device=device),
             )
             return int(torch.distributions.Categorical(logits=logits).sample())
@@ -164,7 +168,8 @@ def main():
     parser.add_argument("--seed", type=int, default=1000)
     parser.add_argument("--maps", type=parse_maps, default="1", help="maps to play, e.g. 1, 1-8, 1,3,5 or all")
     parser.add_argument("--side", default="gdi", choices=SIDES + ("random",))
-    parser.add_argument("--expert", default="ai", choices=VARIANTS, help="expert rules for --policy expert")
+    parser.add_argument("--expert", choices=VARIANTS,
+                        help="expert rules for --policy expert (default ai), or a checkpoint's (default its own)")
     parser.add_argument("--ai-difficulty", default="normal", choices=["easy", "normal", "hard"])
     parser.add_argument("--max-minutes", type=float, default=30)
     parser.add_argument("--show-actions", action="store_true")
@@ -182,6 +187,11 @@ def main():
         policy = "expert"  # Needs the env; evaluate() binds it.
     else:
         policy = model_policy(args.policy)
+        if args.expert is None:
+            import torch
+
+            args.expert = torch.load(args.policy, map_location="cpu", weights_only=False)["args"].get("expert", "ai")
+    args.expert = args.expert or "ai"
     video = None
     if args.video:
         video = {"path": args.video, "speed": args.video_speed, "fps": args.video_fps, "scale": args.video_scale}

@@ -23,7 +23,9 @@ AI's own rules would (tdgym/expert.py; --expert improved for the variant that fi
 rules the game leaves unfinished), fading linearly to zero over --expert-steps, so
 early training follows the AI's build order and attack rhythm and the final objective is
 still only winning. The log shows how often the agent agrees with the expert when it has
-a recommendation.
+a recommendation. --expert-input also feeds the expert's recommendations to the network as
+extra features, so it can learn when to follow them rather than only which actions tend to
+pay; --init-from a checkpoint without them starts their weights at zero.
 
 --benchmark trains for --total-steps with fixed seeds and no checkpoints, then reports the
 wall time and where it went (game processes, policy inference, PPO updates), with the
@@ -91,6 +93,7 @@ def parse_args():
     p.add_argument("--expert-bonus", type=float, default=0.0,
                    help="reward for taking an action the built-in AI's rules recommend, see above")
     p.add_argument("--expert", default="ai", choices=VARIANTS, help="which expert rules, see tdgym/expert.py")
+    p.add_argument("--expert-input", action="store_true", help="give the network the expert's recommendations")
     p.add_argument("--expert-steps", type=int, default=10_000_000, help="steps over which the expert bonus fades out")
     p.add_argument("--max-minutes", type=float, default=30)
     p.add_argument("--decision-frames", type=int, default=30)
@@ -130,14 +133,30 @@ def env_item(stacked, i):
     return stacked[i]
 
 
-def to_tensors(obs, device):
+def to_tensors(obs, device, expert_input=False):
     import torch
 
+    features = obs["features"]
+    if expert_input:
+        features = np.concatenate([features, np.asarray(obs["expert"], dtype=np.float32)], axis=-1)
     return (
         torch.as_tensor(obs["map"], device=device),
-        torch.as_tensor(obs["features"], device=device),
+        torch.as_tensor(features, device=device),
         torch.as_tensor(obs["mask"], device=device),
     )
+
+
+def load_widening(net, state):
+    """Load 'state' into 'net', zero-padding input layers that net has more inputs for (the
+    expert features), so a checkpoint without them starts out behaving exactly as before."""
+    own = net.state_dict()
+    for key, value in state.items():
+        mine = own.get(key)
+        if mine is not None and value.dim() == 2 and mine.shape[0] == value.shape[0] and mine.shape[1] > value.shape[1]:
+            padded = mine.new_zeros(mine.shape)
+            padded[:, : value.shape[1]] = value
+            state[key] = padded
+    net.load_state_dict(state)
 
 
 def main():
@@ -156,7 +175,8 @@ def main():
     torch.set_num_threads(2)
     device = torch.device(args.device)
 
-    shape = {"planes": len(PLANES), "grid": GRID, "features": FEATURES, "actions": len(ACTIONS)}
+    n_features = FEATURES + (len(ACTIONS) if args.expert_input else 0)
+    shape = {"planes": len(PLANES), "grid": GRID, "features": n_features, "actions": len(ACTIONS)}
     net = Policy(**shape).to(device)
     optimizer = torch.optim.Adam(net.parameters(), lr=args.lr, eps=1e-5)
     global_step = update = 0
@@ -173,11 +193,11 @@ def main():
         if args.curriculum and "curriculum" in checkpoint:
             curriculum.load(checkpoint["curriculum"])
     elif args.init_from:
-        net.load_state_dict(torch.load(args.init_from, map_location=device, weights_only=False)["model"])
+        load_widening(net, torch.load(args.init_from, map_location=device, weights_only=False)["model"])
 
     n, t = args.envs, args.steps
     maps = torch.zeros((t, n, len(PLANES), GRID, GRID), dtype=torch.uint8, device=device)
-    features = torch.zeros((t, n, FEATURES), device=device)
+    features = torch.zeros((t, n, n_features), device=device)
     masks = torch.zeros((t, n, len(ACTIONS)), dtype=torch.int8, device=device)
     actions = torch.zeros((t, n), dtype=torch.long, device=device)
     logprobs = torch.zeros((t, n), device=device)
@@ -247,7 +267,7 @@ def main():
         try:
             for step in range(t):
                 t0 = time.time()
-                m, f, k = to_tensors(obs, device)
+                m, f, k = to_tensors(obs, device, args.expert_input)
                 maps[step], features[step], masks[step], dones[step] = m, f, k, next_done
                 with torch.no_grad():
                     logits, value = net(m, f, k)
@@ -269,7 +289,7 @@ def main():
                     for i in np.nonzero(truncated & ~terminated)[0]:
                         final = {key: np.asarray(v)[None] for key, v in env_item(info["final_obs"], i).items()}
                         with torch.no_grad():
-                            reward[i] += args.gamma * float(net(*to_tensors(final, device))[1])
+                            reward[i] += args.gamma * float(net(*to_tensors(final, device, args.expert_input))[1])
                 advised = expert.any(axis=1)
                 followed = expert[np.arange(n), action_np].astype(bool)
                 expert_counts["advised"] += int(advised.sum())
@@ -336,7 +356,7 @@ def main():
         t_update = time.time()
         # Generalised advantage estimation.
         with torch.no_grad():
-            next_value = net(*to_tensors(obs, device))[1]
+            next_value = net(*to_tensors(obs, device, args.expert_input))[1]
             advantages = torch.zeros_like(rewards)
             last = 0
             for step in reversed(range(t)):
