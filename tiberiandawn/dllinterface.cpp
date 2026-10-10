@@ -218,6 +218,7 @@ extern "C" __declspec(dllexport) void __cdecl CNC_Set_Random_Seed(unsigned int s
 extern "C" __declspec(dllexport) void __cdecl CNC_Set_Headless(bool headless);
 extern "C" __declspec(dllexport) void __cdecl CNC_Free_Game(void);
 extern "C" __declspec(dllexport) void __cdecl CNC_Set_AI_Difficulty(int difficulty);
+extern "C" __declspec(dllexport) void __cdecl CNC_Selected_Hunt(uint64 player_id);
 
 /*
 ** Handicap for AI players in multiplayer games, set by CNC_Set_AI_Difficulty; -1 leaves the
@@ -294,6 +295,7 @@ public:
     static void Select_Next_Unit(uint64 player_id);
     static void Select_Previous_Unit(uint64 player_id);
     static void Selected_Guard_Mode(uint64 player_id);
+    static void Selected_Hunt(uint64 player_id);
     static void Selected_Stop(uint64 player_id);
     static void Team_Units_Formation_Toggle_On(uint64 player_id);
     static void Units_Queued_Movement_Toggle(uint64 player_id, bool toggle);
@@ -2000,6 +2002,17 @@ extern "C" __declspec(dllexport) void __cdecl CNC_Set_AI_Difficulty(int difficul
     */
     static const DiffType handicaps[] = {DIFF_HARD, DIFF_NORMAL, DIFF_EASY};
     AIHandicap = (difficulty >= 0 && difficulty <= 2) ? handicaps[difficulty] : -1;
+}
+
+/**************************************************************************************************
+ * CNC_Selected_Hunt -- Send the player's selected armed units to search and destroy
+ *
+ * MISSION_HUNT, as the skirmish AI attacks with (HouseClass::AI_Attack): each unit seeks
+ * out and fights the greatest threat it can find rather than walking to one spot.
+ **************************************************************************************************/
+extern "C" __declspec(dllexport) void __cdecl CNC_Selected_Hunt(uint64 player_id)
+{
+    DLLExportClass::Selected_Hunt(player_id);
 }
 
 /**************************************************************************************************
@@ -6759,6 +6772,24 @@ void DLLExportClass::Selected_Guard_Mode(uint64 player_id)
                     OutList.Add(EventClass(tech->As_Target(), MISSION_GUARD));
                 }
             }
+        }
+    }
+}
+
+/**************************************************************************************************
+ * DLLExportClass::Selected_Hunt -- See CNC_Selected_Hunt.
+ **************************************************************************************************/
+void DLLExportClass::Selected_Hunt(uint64 player_id)
+{
+    if (!DLLExportClass::Set_Player_Context(player_id)) {
+        return;
+    }
+
+    for (int index = 0; index < CurrentObject.Count(); index++) {
+        ObjectClass const* tech = CurrentObject[index];
+
+        if (tech && tech->Can_Player_Move() && tech->Can_Player_Fire()) {
+            OutList.Add(EventClass(tech->As_Target(), MISSION_HUNT));
         }
     }
 }

@@ -613,6 +613,16 @@ int tdenv_stop(const int* types, const int* ids, int count)
     return 1;
 }
 
+int tdenv_hunt(const int* types, const int* ids, int count)
+{
+    if (Select(types, ids, count) == 0) {
+        return 0;
+    }
+    Game.Selected_Hunt(AGENT);
+    Game.Clear_Object_Selection(AGENT);
+    return 1;
+}
+
 int tdenv_sell(int building_id)
 {
     if (Find_Own_Object(TDENV_BUILDING, building_id) == nullptr) {

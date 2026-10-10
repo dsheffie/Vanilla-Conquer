@@ -133,6 +133,12 @@ def env_item(stacked, i):
     return stacked[i]
 
 
+def torch_cat(tensors):
+    import torch
+
+    return torch.cat(tensors)
+
+
 def to_tensors(obs, device, expert_input=False):
     import torch
 
@@ -148,7 +154,21 @@ def to_tensors(obs, device, expert_input=False):
 
 def load_widening(net, state):
     """Load 'state' into 'net', zero-padding input layers that net has more inputs for (the
-    expert features), so a checkpoint without them starts out behaving exactly as before."""
+    expert features), so a checkpoint without them starts out behaving exactly as before.
+    Actions added since the checkpoint (hunt) start as copies of attack, with both logits
+    lowered by log(copies) so the policy attacks as often as before, split among them."""
+    import math
+
+    state = dict(state)
+    old_actions = state["policy.bias"].shape[0]
+    if old_actions < len(ACTIONS):
+        src = ACTIONS.index("attack")
+        copies = 1 + len(ACTIONS) - old_actions
+        weight, bias = state["policy.weight"], state["policy.bias"].clone()
+        bias[src] -= math.log(copies)
+        extra = len(ACTIONS) - old_actions
+        state["policy.weight"] = torch_cat([weight, weight[src : src + 1].repeat(extra, 1)])
+        state["policy.bias"] = torch_cat([bias, bias[src : src + 1].repeat(extra)])
     own = net.state_dict()
     for key, value in state.items():
         mine = own.get(key)

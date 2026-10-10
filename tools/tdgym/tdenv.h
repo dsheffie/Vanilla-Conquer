@@ -159,6 +159,11 @@ int tdenv_placement(const char* name, unsigned char* valid);
 */
 int tdenv_command(const int* types, const int* ids, int count, int x, int y);
 int tdenv_stop(const int* types, const int* ids, int count);
+/*
+** Send the agent's armed mobile objects among (types[i], ids[i]) to hunt: search and destroy
+** on their own, as the built-in AI attacks.
+*/
+int tdenv_hunt(const int* types, const int* ids, int count);
 int tdenv_sell(int building_id);
 
 #ifdef __cplusplus

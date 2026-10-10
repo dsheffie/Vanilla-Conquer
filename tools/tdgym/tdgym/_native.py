@@ -155,6 +155,7 @@ class Native:
             "tdenv_placement": ([c_str, byte_p], c_int),
             "tdenv_command": ([int_p, int_p, c_int, c_int, c_int], c_int),
             "tdenv_stop": ([int_p, int_p, c_int], c_int),
+            "tdenv_hunt": ([int_p, int_p, c_int], c_int),
             "tdenv_sell": ([c_int], c_int),
         }
         for name, (args, result) in signatures.items():
@@ -247,6 +248,11 @@ class Native:
     def stop(self, objects):
         types, ids, tp, ip = self._id_arrays(objects)
         return bool(self._lib.tdenv_stop(tp, ip, len(types)))
+
+    def hunt(self, objects):
+        """Send own objects (rows of objects()) to search and destroy."""
+        types, ids, tp, ip = self._id_arrays(objects)
+        return bool(self._lib.tdenv_hunt(tp, ip, len(types)))
 
     def sell(self, building_id):
         return bool(self._lib.tdenv_sell(building_id))

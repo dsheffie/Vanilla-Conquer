@@ -2,8 +2,18 @@
 
 MacroEnv wraps the click-level environment with a small discrete set of decisions a
 player makes: deploy the MCV, build or train something by role, send harvesters out,
-attack, scout or defend. Finished buildings are placed automatically. Each decision
+attack, hunt, scout or defend. Finished buildings are placed automatically. Each decision
 lasts decision_frames game frames.
+
+Army orders:
+- attack is an attack-move on the enemy's production: the army heads for the nearest known
+  construction yard, factory or barracks (else any building, any enemy, or unexplored
+  ground), and every decision each unit fights the nearest visible enemy within
+  ENGAGE_RADIUS cells instead, if there is one. It stands until another army order.
+- hunt puts the army into the game's own search-and-destroy mission, as the built-in AI
+  attacks: each unit seeks out the greatest threat it can find.
+- scout sends one unit to unexplored ground, defend brings the army home, and harvest
+  sends idle harvesters to the nearest known Tiberium.
 
 The observation adds a normalised feature vector and the action mask, so masks travel
 with observations through vector environments.
@@ -51,7 +61,12 @@ UNITS = {
     "rocket_launcher": ["MLRS"],
     "aircraft": ["ORCA", "HELI"],
 }
-ARMY = ("attack", "scout", "defend", "harvest")
+# hunt is last so the earlier actions keep their indices from before it was added.
+ARMY = ("attack", "scout", "defend", "harvest", "hunt")
+# Enemy buildings attack goes for first: what the enemy builds with.
+PRODUCTION = {b"FACT", b"WEAP", b"AFLD", b"PYLE", b"HAND", b"HPAD"}
+# Cells within which a unit on attack fights an enemy rather than walking past it.
+ENGAGE_RADIUS = 5
 
 ACTIONS = (
     ["noop", "deploy_mcv"]
@@ -145,12 +160,17 @@ class MacroEnv(gym.Wrapper):
     def reset(self, **kwargs):
         obs, info = self.env.reset(**kwargs)
         self.expert.reset()
+        self._attacking = False
+        self._attack_goal = None  # Exploration goal while no enemy is known.
+        self._orders = {}  # Unit id: the cell it was last sent to on attack.
         self._explored_fraction = self._explored_now()
         return self._wrap(obs), info
 
     def step(self, action):
         previous = self.base._scalars
         self._apply(int(action))
+        if self._attacking:
+            self._drive_attack()
         self.expert.note_action(ACTIONS[int(action)], previous["frame"])
         self._place_finished()
         obs, _, terminated, truncated, info = self.env.step(np.zeros(6, dtype=np.int64))
@@ -188,7 +208,7 @@ class MacroEnv(gym.Wrapper):
         for role, names in UNITS.items():
             mask[ACTION_INDEX["train_" + role]] = self._buildable(names) is not None
         has_army = len(self._army()) > 0
-        for name in ("attack", "scout", "defend"):
+        for name in ("attack", "scout", "defend", "hunt"):
             mask[ACTION_INDEX[name]] = has_army
         mask[ACTION_INDEX["harvest"]] = bool((own["name"] == b"HARV").any()) and bool(self.base._tiberium.any())
         return mask
@@ -252,26 +272,19 @@ class MacroEnv(gym.Wrapper):
         elif name.startswith("train_"):
             native.build(self._buildable(UNITS[name[6:]]))
         elif name == "attack":
-            army = self._army()
-            objects = self.base.objects
-            enemies = objects[objects["relation"] == ENEMY]
-            cx, cy = np.mean(army["cell_x"]), np.mean(army["cell_y"])
-            if len(enemies):
-                buildings = enemies[enemies["type"] == BUILDING]
-                targets = buildings if len(buildings) else enemies
-                x, y = self._nearest(targets["cell_x"], targets["cell_y"], cx, cy)
-            else:
-                target = self._unexplored_target()
-                if target is None:
-                    return
-                x, y = target
-            self._command(army, x, y)
+            self._attacking = True
+            self._orders = {}
+        elif name == "hunt":
+            self._attacking = False
+            native.hunt(self._army())
         elif name == "scout":
+            self._attacking = False
             army = self._army()
             target = self._unexplored_target()
             if target is not None:
                 self._command(army[self.base.np_random.integers(len(army))][None], *target)
         elif name == "defend":
+            self._attacking = False
             self._command(self._army(), *self._base_center())
         elif name == "harvest":
             own = self._own()
@@ -280,6 +293,49 @@ class MacroEnv(gym.Wrapper):
                 if harvester["pips"] == 0:  # Not carrying a load back.
                     x, y = self._nearest(xs, ys, harvester["cell_x"], harvester["cell_y"])
                     native.command(harvester[None], int(x), int(y))
+
+    def _goal(self, army):
+        """Where attack heads: the nearest known enemy production, else building, else any
+        enemy, else unexplored ground (kept until explored)."""
+        objects = self.base.objects
+        enemies = objects[objects["relation"] == ENEMY]
+        cx, cy = np.mean(army["cell_x"]), np.mean(army["cell_y"])
+        buildings = enemies[enemies["type"] == BUILDING]
+        production = buildings[np.isin(buildings["name"], list(PRODUCTION))]
+        for targets in (production, buildings, enemies):
+            if len(targets):
+                return self._nearest(targets["cell_x"], targets["cell_y"], cx, cy)
+        goal = self._attack_goal
+        if goal is None or self.base._explored[goal[1], goal[0]]:
+            goal = self._attack_goal = self._unexplored_target()
+        return goal
+
+    def _drive_attack(self):
+        """One decision of attack-move: each unit fights the nearest visible enemy within
+        ENGAGE_RADIUS, or else heads for the goal. Orders are only re-sent when they change,
+        so units aren't interrupted mid-fight."""
+        army = self._army()
+        if len(army) == 0:
+            return
+        goal = self._goal(army)
+        objects = self.base.objects
+        enemies = objects[objects["relation"] == ENEMY]
+        orders = {}
+        for unit in army:
+            target = goal
+            if len(enemies):
+                d = (enemies["cell_x"] - unit["cell_x"]) ** 2 + (enemies["cell_y"] - unit["cell_y"]) ** 2
+                i = int(np.argmin(d))
+                if d[i] <= ENGAGE_RADIUS**2:
+                    target = (enemies["cell_x"][i], enemies["cell_y"][i])
+            if target is None:
+                continue
+            target = (int(target[0]), int(target[1]))
+            uid = int(unit["id"])
+            if self._orders.get(uid) != target:
+                self.base._native.command(unit[None], *target)
+            orders[uid] = target
+        self._orders = orders
 
     def _place_finished(self):
         """Place any finished building: refineries near Tiberium, the rest near the base."""

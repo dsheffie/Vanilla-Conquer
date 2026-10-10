@@ -12,7 +12,8 @@ tiberiandawn/house.cpp with the default rules.ini values:
   armed vehicle.
 - Infantry: riflemen, grenadiers (or flamethrowers) and rocket soldiers while there are
   fewer infantry than buildings or more than 3,000 credits to spend.
-- Attack: from the first minute, every 1.5-6 minutes, send the army to hunt.
+- Attack: from the first minute, every 1.5-6 minutes, send the army to hunt (MacroEnv's
+  hunt, the same search-and-destroy mission the AI uses).
 
 It reads only what the agent observes, and only recommends actions the mask allows. The
 AI's hidden scenario state (teams, IQ, the house it has picked as its enemy) is left out.
@@ -82,7 +83,7 @@ class Expert:
 
     def note_action(self, name, frame):
         """The agent took action 'name' at game frame 'frame': an attack restarts the timer."""
-        if name == "attack":
+        if name in ("attack", "hunt"):
             rng = self.macro.base.np_random
             self._next_attack = frame + ATTACK_INTERVAL * int(
                 rng.integers(TICKS_PER_MINUTE // 2, TICKS_PER_MINUTE * 2 + 1)
@@ -98,8 +99,8 @@ class Expert:
         if allowed("deploy_mcv"):
             groups.append(["deploy_mcv"])
         state = self._state()
-        if state["frame"] >= self._next_attack and allowed("attack"):
-            groups.append(["attack"])
+        if state["frame"] >= self._next_attack and allowed("hunt"):
+            groups.append(["hunt"])
         for choose in (self._building, self._vehicle, self._infantry):
             group = [name for name in choose(state) if allowed(name)]
             if group:
